@@ -6,6 +6,11 @@ const rateLimit = require('express-rate-limit');
 const supabase = require('./config/database');
 
 const authRoutes = require('./routes/authRoutes');
+const menuRoutes = require('./routes/menuRoutes');
+const orderRoutes = require('./routes/orderRoutes');
+
+require('./jobs/penaltyJob');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -58,3 +63,5 @@ app.use((req, res, next) => {
 });
 
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/menus', menuRoutes);
+app.use('/api/v1/orders', orderRoutes);
