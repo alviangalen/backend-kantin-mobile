@@ -45,7 +45,12 @@ exports.createOrder = async (req, res) => {
             earnedPoints = Math.floor(totalAmount / 10000);
         }
 
-        const prefix = paymentMethod === 'QRIS' ? 'Q' : 'C';
+        // Normalisasi payment method: jika TUNAI / CASH disimpan sebagai 'CASH', jika QRIS disimpan sebagai 'QRIS'
+        const methodUpper = (paymentMethod || 'CASH').toString().toUpperCase().trim();
+        const isQris = methodUpper === 'QRIS';
+        const dbPaymentMethod = isQris ? 'QRIS' : 'CASH';
+
+        const prefix = isQris ? 'Q' : 'C';
         const randomNum = Math.floor(1000 + Math.random() * 9000);
         const orderNumber = prefix + "-" + randomNum;
         const { data: newOrder, error: orderError } = await supabase
@@ -55,8 +60,8 @@ exports.createOrder = async (req, res) => {
                 student_id: studentId,
                 stand_id: standId,
                 total_amount: totalAmount,
-                payment_method: paymentMethod,
-                status: paymentMethod === 'QRIS' ? 'PENDING_PAYMENT' : 'READY_FOR_PICKUP',
+                payment_method: dbPaymentMethod,
+                status: isQris ? 'PENDING_PAYMENT' : 'READY_FOR_PICKUP',
                 used_points: usedPoints,
                 earned_points: earnedPoints
             }])
@@ -78,7 +83,11 @@ exports.createOrder = async (req, res) => {
         res.status(201).json({
             status: "success",
             message: "Pesanan berhasil dibuat!",
-            data: newOrder
+            data: {
+                ...newOrder,
+                orderNumber: newOrder.order_number,
+                paymentMethod: paymentMethod || dbPaymentMethod
+            }
         });
 
     } catch (err) {
