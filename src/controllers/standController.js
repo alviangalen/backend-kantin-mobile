@@ -1,4 +1,4 @@
-const supabase = require('../config/database');
+﻿const supabase = require('../config/database');
 
 exports.getAllStands = async (req, res) => {
     try {
@@ -20,10 +20,30 @@ exports.getAllStands = async (req, res) => {
         }));
 
         res.status(200).json({
-            status: "success",
+            status: success,
             data: formattedStands
         });
     } catch (err) {
-        res.status(500).json({ status: "error", message: err.message });
+        res.status(500).json({ status: error, message: err.message });
+    }
+};
+
+exports.getMenusByStand = async (req, res) => {
+    const { standId } = req.params;
+    try {
+        const { data: menus, error } = await supabase
+            .from('menus')
+            .select('*, stands(name, stand_number)')
+            .eq('stand_id', standId)
+            .eq('is_available', true);
+
+        if (error) throw error;
+
+        res.status(200).json({
+            status: success,
+            data: menus || []
+        });
+    } catch (err) {
+        res.status(500).json({ status: error, message: err.message });
     }
 };
