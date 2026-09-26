@@ -6,6 +6,8 @@ const rateLimit = require('express-rate-limit');
 const supabase = require('./config/database');
 
 const authRoutes = require('./routes/authRoutes');
+const userRoutes = require('./routes/userRoutes');
+const standRoutes = require('./routes/standRoutes');
 const menuRoutes = require('./routes/menuRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 
@@ -26,6 +28,7 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
+// Health check endpoint
 app.get('/api/v1/health', async (req, res) => {
     try {
         const { data, error } = await supabase.rpc('now'); 
@@ -47,11 +50,7 @@ app.get('/api/v1/health', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`[SERVER] API berjalan di http://localhost:${PORT}`);
-    console.log(`[ENV] Mode: ${process.env.NODE_ENV}`);
-});
-
+// Validasi x-api-key untuk endpoint protected
 app.use((req, res, next) => {
     const apiKey = req.headers['x-api-key'];
     if (req.path === '/api/v1/health') return next(); 
@@ -62,6 +61,16 @@ app.use((req, res, next) => {
     next();
 });
 
+// Route registration
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/stands', standRoutes);
 app.use('/api/v1/menus', menuRoutes);
 app.use('/api/v1/orders', orderRoutes);
+
+app.listen(PORT, () => {
+    console.log(`[SERVER] API berjalan di http://localhost:${PORT}`);
+    console.log(`[ENV] Mode: ${process.env.NODE_ENV}`);
+});
+
+module.exports = app;
