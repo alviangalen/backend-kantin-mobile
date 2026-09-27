@@ -16,14 +16,14 @@ require('./jobs/penaltyJob');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(helmet()); 
-app.use(cors());   
-app.use(express.json()); 
+app.use(helmet());
+app.use(cors());
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const limiter = rateLimit({
-    windowMs: 1 * 60 * 1000, 
-    max: 100, 
+    windowMs: 1 * 60 * 1000,
+    max: 100,
     message: { status: "error", message: "Terlalu banyak request, coba lagi nanti." }
 });
 app.use(limiter);
@@ -31,8 +31,8 @@ app.use(limiter);
 // Health check endpoint
 app.get('/api/v1/health', async (req, res) => {
     try {
-        const { data, error } = await supabase.rpc('now'); 
-        
+        const { data, error } = await supabase.rpc('now');
+
         if (error) throw error;
 
         res.status(200).json({
@@ -53,8 +53,8 @@ app.get('/api/v1/health', async (req, res) => {
 // Validasi x-api-key untuk endpoint protected
 app.use((req, res, next) => {
     const apiKey = req.headers['x-api-key'];
-    if (req.path === '/api/v1/health') return next(); 
-    
+    if (req.path === '/api/v1/health') return next();
+
     if (apiKey !== process.env.APP_SECRET_KEY) {
         return res.status(403).json({ status: "error", message: "Akses Ditolak: Aplikasi Tidak Valid" });
     }
@@ -65,6 +65,7 @@ app.use((req, res, next) => {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/stands', standRoutes);
+app.use('/api/v1/seller', standRoutes);
 app.use('/api/v1/menus', menuRoutes);
 app.use('/api/v1/orders', orderRoutes);
 

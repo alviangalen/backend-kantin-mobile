@@ -4,13 +4,32 @@ const { sendWhatsAppOtp, formatWhatsAppTarget } = require('../services/whatsappS
 
 const otpStore = {};
 
+function getPhoneVariants(phone) {
+    if (!phone) return [];
+    const str = phone.toString().trim().replace(/[^0-9]/g, '');
+    let core = str;
+    if (core.startsWith('62')) {
+        core = core.slice(2);
+    } else if (core.startsWith('0')) {
+        core = core.slice(1);
+    }
+    const variants = new Set([
+        str,
+        core,
+        '0' + core,
+        '62' + core,
+        '+62' + core
+    ]);
+    return Array.from(variants).filter(Boolean);
+}
+
 function formatUserProfile(user, isNewUser = false, isProfileComplete = false) {
     const hasValidName = Boolean(
         user.full_name &&
         user.full_name.trim() !== '' &&
         user.full_name !== 'Pengguna Baru' &&
         user.full_name !== 'Pengguna' &&
-        user.full_name !== 'User'
+        user.full_name !== 'User' && user.full_name.toUpperCase() !== 'EMPTY'
     );
 
     const complete = isProfileComplete || (hasValidName && !isNewUser);
@@ -40,18 +59,21 @@ exports.requestOtp = async (req, res) => {
 
     const cleanPhone = phoneNumber.toString().trim();
     const target = formatWhatsAppTarget(cleanPhone);
+    const variants = getPhoneVariants(cleanPhone);
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
-    // Simpan OTP dengan masa berlaku 5 menit
+    // Simpan OTP untuk semua variasi nomor telepon
     const expiresAt = Date.now() + 5 * 60000;
-    otpStore[cleanPhone] = { otp, expiresAt };
-    if (target && target !== cleanPhone) {
-        otpStore[target] = { otp, expiresAt };
+    for (const v of variants) {
+        otpStore[v] = { otp, expiresAt };
     }
+    if (target) otpStore[target] = { otp, expiresAt };
 
-    // Auto-cleanup setelah 10 menit (unref agar tidak menahan proses)
+    // Auto-cleanup setelah 10 menit
     const cleanupTimer = setTimeout(() => {
-        delete otpStore[cleanPhone];
+        for (const v of variants) {
+            delete otpStore[v];
+        }
         if (target) delete otpStore[target];
     }, 10 * 60000);
     if (cleanupTimer.unref) cleanupTimer.unref();
@@ -62,7 +84,6 @@ exports.requestOtp = async (req, res) => {
     if (!waResult.success) {
         console.error(`[AUTH] Gagal mengirim OTP ke WhatsApp (${cleanPhone}):`, waResult.reason);
 
-        // Jika dalam mode development, log kode di console untuk kemudahan debugging developer
         if (process.env.NODE_ENV === 'development') {
             console.log(`[DEV MODE] Kode OTP cadangan untuk ${cleanPhone} adalah: ${otp}`);
         }
@@ -90,20 +111,34 @@ exports.verifyOtp = async (req, res) => {
 
     const cleanPhone = phoneNumber.toString().trim();
     const target = formatWhatsAppTarget(cleanPhone);
-    const record = otpStore[cleanPhone] || (target ? otpStore[target] : null);
+    const variants = getPhoneVariants(cleanPhone);
+
+    let record = null;
+    for (const v of variants) {
+        if (otpStore[v]) {
+            record = otpStore[v];
+            break;
+        }
+    }
+    if (!record && target && otpStore[target]) {
+        record = otpStore[target];
+    }
 
     if (!record || record.otp !== otp.toString().trim() || record.expiresAt < Date.now()) {
         return res.status(401).json({ status: "error", message: "OTP salah atau kedaluwarsa" });
     }
 
     try {
-        let { data: user, error } = await supabase
+        // Cari user dengan pencarian multi-varian nomor HP
+        let { data: users } = await supabase
             .from('profiles')
             .select('*')
-            .eq('phone_number', cleanPhone)
-            .maybeSingle();
+            .in('phone_number', variants)
+            .limit(1);
 
-        if (!user && target && target !== cleanPhone) {
+        let user = users && users.length > 0 ? users[0] : null;
+
+        if (!user && target) {
             const { data: userByTarget } = await supabase
                 .from('profiles')
                 .select('*')
@@ -119,12 +154,11 @@ exports.verifyOtp = async (req, res) => {
             isNewUser = true;
             isProfileComplete = false;
 
-            // Masukkan data baru ke profiles tanpa data palsu nama / kelas
             const { data: newUser, error: insertError } = await supabase
                 .from('profiles')
                 .insert([{ 
                     phone_number: cleanPhone, 
-                    full_name: '', // Mengisi string kosong untuk memenuhi constraint NOT NULL tanpa memberikan nama palsu
+                    full_name: '', 
                     role: 'STUDENT',
                     class_name: null,
                     nis: null,
@@ -136,13 +170,12 @@ exports.verifyOtp = async (req, res) => {
             if (insertError) throw insertError;
             user = newUser;
         } else {
-            // Periksa apakah profil pengguna sudah memiliki nama yang valid (bukan placeholder)
             const hasValidName = Boolean(
                 user.full_name && 
                 user.full_name.trim() !== '' && 
                 user.full_name !== 'Pengguna Baru' && 
                 user.full_name !== 'Pengguna' && 
-                user.full_name !== 'User'
+                user.full_name !== 'User' && user.full_name.toUpperCase() !== 'EMPTY'
             );
 
             if (!hasValidName) {
@@ -154,7 +187,9 @@ exports.verifyOtp = async (req, res) => {
             }
         }
 
-        delete otpStore[cleanPhone];
+        for (const v of variants) {
+            delete otpStore[v];
+        }
         if (target) delete otpStore[target];
 
         const token = jwt.sign(
@@ -174,7 +209,18 @@ exports.verifyOtp = async (req, res) => {
         }
 
         const formattedUser = formatUserProfile(user, isNewUser, isProfileComplete);
-        if (stand) formattedUser.stand = stand;
+        if (stand) {
+            formattedUser.stand = {
+                id: stand.id,
+                name: stand.name,
+                ownerName: stand.owner_name || user.full_name || null,
+                counterSlot: stand.stand_number,
+                counterNumber: stand.stand_number,
+                category: stand.category,
+                isOpen: stand.is_open,
+                rating: 4.8
+            };
+        }
 
         res.status(200).json({
             status: "success",
@@ -202,7 +248,6 @@ exports.register = async (req, res) => {
         return res.status(400).json({ status: "error", message: "Nama lengkap wajib diisi" });
     }
 
-    // Identifikasi user dari Bearer Token atau dari phoneNumber di body
     let userId = null;
     let userPhone = null;
 
@@ -211,9 +256,7 @@ exports.register = async (req, res) => {
             const token = req.headers.authorization.split(' ')[1];
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
             userId = decoded.id;
-        } catch (e) {
-            // Token tidak valid atau kedaluwarsa
-        }
+        } catch (e) {}
     }
 
     if (!userId && req.body.phoneNumber) {
@@ -232,7 +275,8 @@ exports.register = async (req, res) => {
         if (userId) {
             query = query.eq('id', userId);
         } else {
-            query = query.eq('phone_number', userPhone);
+            const variants = getPhoneVariants(userPhone);
+            query = query.in('phone_number', variants);
         }
 
         const { data: user, error: userError } = await query.maybeSingle();
@@ -241,7 +285,6 @@ exports.register = async (req, res) => {
             return res.status(404).json({ status: "error", message: "Profil pengguna tidak ditemukan" });
         }
 
-        // Normalisasi role
         const roleInput = (role || user.role || 'STUDENT').toString().toUpperCase();
         let mappedRole = 'STUDENT';
         if (roleInput === 'PENJUAL' || roleInput === 'SELLER') {
@@ -250,13 +293,10 @@ exports.register = async (req, res) => {
             mappedRole = 'ADMIN';
         }
 
-        const chosenClass = (className || studentClass || req.body.class || '').trim() || null;
+        const chosenClass = (className || studentClass || req.body.class || req.body.class_name || req.body.className || req.body.studentClass || '').trim() || null;
         const chosenNis = (nis || '').trim() || null;
 
-        // Berikan bonus 5 loyalty poin jika siswa baru pertama kali melengkapi profil
-        const bonusPoints = (mappedRole === 'STUDENT' && (user.points || 0) === 0) 
-            ? 5 
-            : (user.points || 0);
+        const bonusPoints = user.points || 0;
 
         const updatePayload = {
             full_name: chosenName,
@@ -309,7 +349,18 @@ exports.register = async (req, res) => {
         );
 
         const formattedUser = formatUserProfile(updatedUser, false, true);
-        if (standData) formattedUser.stand = standData;
+        if (standData) {
+            formattedUser.stand = {
+                id: standData.id,
+                name: standData.name,
+                ownerName: standData.owner_name || updatedUser.full_name || null,
+                counterSlot: standData.stand_number,
+                counterNumber: standData.stand_number,
+                category: standData.category,
+                isOpen: standData.is_open,
+                rating: 4.8
+            };
+        }
 
         res.status(200).json({
             status: "success",
@@ -339,6 +390,9 @@ exports.getMe = async (req, res) => {
         }
 
         let stand = null;
+        let todayIncome = 0;
+        let completedOrders = 0;
+
         if (user.role === 'SELLER') {
             const { data: userStand } = await supabase
                 .from('stands')
@@ -346,10 +400,43 @@ exports.getMe = async (req, res) => {
                 .eq('owner_id', user.id)
                 .maybeSingle();
             stand = userStand;
+
+            if (stand) {
+                const now = new Date();
+                const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+
+                const { data: orders } = await supabase
+                    .from('orders')
+                    .select('total_amount')
+                    .eq('stand_id', stand.id)
+                    .eq('status', 'COMPLETED')
+                    .gte('created_at', startOfToday);
+
+                if (orders) {
+                    todayIncome = orders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+                    completedOrders = orders.length;
+                }
+            }
         }
 
         const formattedUser = formatUserProfile(user);
-        if (stand) formattedUser.stand = stand;
+        if (stand) {
+            formattedUser.stand = {
+                id: stand.id,
+                name: stand.name,
+                standName: stand.name,
+                ownerName: stand.owner_name || user.full_name || null,
+                counterSlot: stand.stand_number,
+                counterNumber: stand.stand_number,
+                standNumber: stand.stand_number,
+                category: stand.category,
+                isOpen: stand.is_open,
+                rating: 4.8
+            };
+            formattedUser.todayIncome = todayIncome;
+            formattedUser.todayRevenue = todayIncome;
+            formattedUser.completedOrders = completedOrders;
+        }
 
         res.status(200).json({
             status: "success",
@@ -368,7 +455,7 @@ exports.updateMe = async (req, res) => {
         const chosenName = (name || fullName || '').trim();
         if (chosenName) updatePayload.full_name = chosenName;
 
-        const chosenClass = (className || studentClass || req.body.class || '').trim();
+        const chosenClass = (className || studentClass || req.body.class || req.body.class_name || req.body.className || req.body.studentClass || '').trim();
         if (chosenClass) updatePayload.class_name = chosenClass;
 
         if (nis !== undefined) updatePayload.nis = (nis || '').trim() || null;
@@ -393,7 +480,18 @@ exports.updateMe = async (req, res) => {
         }
 
         const formattedUser = formatUserProfile(updatedUser);
-        if (stand) formattedUser.stand = stand;
+        if (stand) {
+            formattedUser.stand = {
+                id: stand.id,
+                name: stand.name,
+                ownerName: stand.owner_name || updatedUser.full_name || null,
+                counterSlot: stand.stand_number,
+                counterNumber: stand.stand_number,
+                category: stand.category,
+                isOpen: stand.is_open,
+                rating: 4.8
+            };
+        }
 
         res.status(200).json({
             status: "success",
