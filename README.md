@@ -173,8 +173,6 @@ backend-kantin-mobile/
 │   ├── services/
 │   │   └── whatsappService.js   # Service pengiriman OTP via Fonnte API
 │   └── server.js                # Server Express, konfigurasi middleware, & routing
-├── check_db.js                  # Script utilitas verifikasi isi database
-├── fix_data.js                  # Script utilitas perbaikan relasi data stand & menu
 ├── .env.example                 # Template konfigurasi environment
 ├── package.json                 # Konfigurasi dependensi Node.js
 └── render.yaml                  # Konfigurasi deployment web service di Render
