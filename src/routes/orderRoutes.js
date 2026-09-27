@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const orderController = require('../controllers/orderController');
 const auth = require('../middlewares/authMiddleware');
@@ -12,6 +12,10 @@ router.get('/', auth.protect, orderController.getOrders);
 
 // Endpoint Detail Satu Pesanan
 router.get('/:orderId', auth.protect, orderController.getOrderDetail);
+
+// Endpoint Update Status Pesanan (COOKING, READY, COMPLETED, dll)
+router.patch('/:orderId/status', auth.protect, auth.restrictTo('SELLER', 'ADMIN'), orderController.updateOrderStatus);
+router.put('/:orderId/status', auth.protect, auth.restrictTo('SELLER', 'ADMIN'), orderController.updateOrderStatus);
 
 // Endpoint Pickup / Selesaikan Pesanan (mendukung /:orderId/pickup dan /:orderNumber/complete)
 router.patch('/:orderId/pickup', auth.protect, auth.restrictTo('SELLER', 'ADMIN'), orderController.completeOrder);

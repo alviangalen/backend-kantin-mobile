@@ -289,3 +289,64 @@ exports.completeOrder = async (req, res) => {
         res.status(500).json({ status: "error", message: err.message });
     }
 };
+
+exports.updateOrderStatus = async (req, res) => {
+    const identifier = req.params.orderId;
+    const { status } = req.body;
+
+    if (!status) {
+        return res.status(400).json({ status: "error", message: "Status pesanan wajib diisi" });
+    }
+
+    try {
+        let query = supabase.from('orders').select('*');
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+        if (isUuid) {
+            query = query.eq('id', identifier);
+        } else {
+            query = query.eq('order_number', identifier);
+        }
+
+        const { data: order, error: orderErr } = await query.maybeSingle();
+        if (orderErr || !order) {
+            return res.status(404).json({ status: "error", message: "Pesanan tidak ditemukan" });
+        }
+
+        const validStatuses = ['PENDING', 'PENDING_PAYMENT', 'COOKING', 'READY', 'READY_FOR_PICKUP', 'COMPLETED', 'CANCELLED'];
+        const upperStatus = status.toUpperCase();
+        if (!validStatuses.includes(upperStatus)) {
+            return res.status(400).json({ status: "error", message: "Status tidak valid" });
+        }
+
+        await supabase
+            .from('orders')
+            .update({ status: upperStatus, updated_at: new Date() })
+            .eq('id', order.id);
+
+        if (upperStatus === 'COMPLETED' && order.status !== 'COMPLETED' && order.earned_points > 0) {
+            const { data: student } = await supabase
+                .from('profiles')
+                .select('points')
+                .eq('id', order.student_id)
+                .single();
+            if (student) {
+                await supabase
+                    .from('profiles')
+                    .update({ points: (student.points || 0) + order.earned_points })
+                    .eq('id', order.student_id);
+            }
+        }
+
+        res.status(200).json({
+            status: "success",
+            message: "Status pesanan " + order.order_number + " berhasil diubah ke " + upperStatus,
+            data: {
+                id: order.id,
+                orderNumber: order.order_number,
+                status: upperStatus
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ status: "error", message: err.message });
+    }
+};
