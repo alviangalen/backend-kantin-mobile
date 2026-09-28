@@ -45,6 +45,7 @@ function formatUserProfile(user, isNewUser = false, isProfileComplete = false) {
         nis: user.nis || null,
         points: user.points || 0,
         violationCount: user.violation_count || 0,
+        isActive: user.is_active !== undefined ? Boolean(user.is_active) : true,
         isNewUser: !complete,
         isProfileComplete: complete
     };
@@ -60,6 +61,26 @@ exports.requestOtp = async (req, res) => {
     const cleanPhone = phoneNumber.toString().trim();
     const target = formatWhatsAppTarget(cleanPhone);
     const variants = getPhoneVariants(cleanPhone);
+
+    // Cek apakah akun pengguna berstatus nonaktif (suspend)
+    try {
+        const { data: existingUser } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('phone_number', variants)
+            .limit(1)
+            .maybeSingle();
+
+        if (existingUser && existingUser.is_active === false) {
+            return res.status(403).json({
+                status: "error",
+                message: "Akun Anda sedang dinonaktifkan (disuspend). Silakan hubungi pihak admin sekolah atau admin kantin untuk mengaktifkan kembali."
+            });
+        }
+    } catch (checkErr) {
+        console.warn('[AUTH] Pengecekan status suspend dilewati:', checkErr.message);
+    }
+
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
     // Simpan OTP untuk semua variasi nomor telepon
@@ -145,6 +166,13 @@ exports.verifyOtp = async (req, res) => {
                 .eq('phone_number', target)
                 .maybeSingle();
             if (userByTarget) user = userByTarget;
+        }
+
+        if (user && user.is_active === false) {
+            return res.status(403).json({
+                status: "error",
+                message: "Akun Anda sedang dinonaktifkan (disuspend). Silakan hubungi pihak admin sekolah atau admin kantin untuk mengaktifkan kembali akun Anda."
+            });
         }
 
         let isNewUser = false;
@@ -285,6 +313,13 @@ exports.register = async (req, res) => {
             return res.status(404).json({ status: "error", message: "Profil pengguna tidak ditemukan" });
         }
 
+        if (user.is_active === false) {
+            return res.status(403).json({
+                status: "error",
+                message: "Akun Anda sedang dinonaktifkan (disuspend). Silakan hubungi admin sekolah untuk mengaktifkannya kembali."
+            });
+        }
+
         const roleInput = (role || user.role || 'STUDENT').toString().toUpperCase();
         let mappedRole = 'STUDENT';
         if (roleInput === 'PENJUAL' || roleInput === 'SELLER') {
@@ -387,6 +422,13 @@ exports.getMe = async (req, res) => {
 
         if (error || !user) {
             return res.status(404).json({ status: "error", message: "Pengguna tidak ditemukan" });
+        }
+
+        if (user.is_active === false) {
+            return res.status(403).json({
+                status: "error",
+                message: "Akun Anda sedang dinonaktifkan (disuspend). Silakan hubungi admin sekolah untuk bantuan."
+            });
         }
 
         let stand = null;

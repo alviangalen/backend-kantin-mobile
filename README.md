@@ -113,7 +113,13 @@ graph TD
 ### 2. Role-Based Access Control (RBAC)
 * **`STUDENT` (Siswa)**: Menjelajahi daftar stand dan menu aktif, checkout pesanan, tukar poin reward, pantau status pesanan & barcode.
 * **`SELLER` (Penjual Stand)**: Kelola profil stand, CRUD menu & foto produk, update stok real-time, proses antrean pesanan, dan monitoring omset harian.
-* **`ADMIN` (Pengelola Koperasi / Sekolah)**: Memantau omset seluruh stan kantin dan mengelola catatan sanksi pelanggaran siswa.
+* **`ADMIN` (Pengelola Koperasi / Sekolah)**: 
+  - **Pendaftaran Terpadu**: Mendaftarkan penjual baru sepaket langsung dengan stan kantinnya (`ownerName`, `standName`, `counterSlot`, `phoneNumber`, `category`).
+  - **Manajemen Stand (CRUD Stand)**: Melihat seluruh stand, edit detail stand, atau hapus stand (jika stand dihapus, akun seller tetap aman dan dapat didaftarkan stan baru).
+  - **Manajemen Akun Penjual**: Melihat seluruh akun seller beserta stannya, serta menghapus akun penjual (beserta stannya jika diinginkan).
+  - **Rekapitulasi Keuangan (Revenue Analytics)**: Memantau omset kotor, omset bersih, biaya koperasi, serta rincian saldo QRIS siap cair dan tunai per masing-masing stand maupun seluruh kantin.
+  - **Manajemen Siswa & Suspend Akun**: CRUD data siswa, rekapitulasi kelas, serta kontrol status akun (`is_active`). Akun yang disuspend (`is_active = false`) otomatis **gagal login dan diblokir dari permintaan OTP**, dengan arahan menghubungi admin.
+  - **Sanksi Pelanggaran (Violations)**: Melihat daftar siswa pelanggar dan memberikan sanksi poin pelanggaran.
 
 ### 3. Upload & Manajemen Foto Produk (CRUD Foto)
 * Penjual dapat **mengunggah foto produk langsung saat menambahkan menu** baru (`POST /api/v1/menus` via `multipart/form-data`).
@@ -385,6 +391,161 @@ Content-Type: `multipart/form-data`
 
 ---
 
+### 7. Administrasi & Manajemen Kantin (`/api/v1/admin`)
+
+> **Hak Akses**: Wajib menyertakan Token JWT dengan peran **`ADMIN`** dan header `x-api-key`. Pengguna dengan peran `STUDENT` atau `SELLER` akan menerima respon `403 Forbidden`.
+
+#### Ringkasan Endpoint Admin:
+
+| Method | Endpoint | Role | Deskripsi |
+|---|---|---|---|
+| `POST` | `/api/v1/admin/stands` | ADMIN | **[SEPAKET]** Daftarkan Akun Penjual baru sekaligus Stan Kantinnya |
+| `POST` | `/api/v1/admin/sellers` | ADMIN | Alias untuk mendaftarkan Penjual & Stan sepaket |
+| `GET` | `/api/v1/admin/stands` | ADMIN | Daftar seluruh stan kantin, pemilik, jumlah menu, dan omset hari ini |
+| `GET` | `/api/v1/admin/stands/:standId` | ADMIN | Detail lengkap satu stan kantin beserta seluruh daftar menunya |
+| `PATCH` / `PUT` | `/api/v1/admin/stands/:standId` | ADMIN | Perbarui data stan (nama, nomor slot counter, kategori, status buka) |
+| `DELETE` | `/api/v1/admin/stands/:standId` | ADMIN | Hapus stan kantin & menunya (**Akun seller tetap tersimpan**) |
+| `GET` | `/api/v1/admin/sellers` | ADMIN | Daftar seluruh akun penjual (`SELLER`) beserta stan miliknya |
+| `DELETE` | `/api/v1/admin/sellers/:sellerId` | ADMIN | Hapus akun penjual beserta stan miliknya dari sistem |
+| `GET` | `/api/v1/admin/revenue` | ADMIN | Rekapitulasi pendapatan seluruh kantin (omset kotor, bersih, potongan koperasi, & performa per stan) |
+| `GET` | `/api/v1/admin/revenue/:standId` | ADMIN | Rincian keuangan stand tertentu (saldo QRIS siap cair, saldo kas tunai, total pesanan) |
+| `GET` | `/api/v1/admin/students` | ADMIN | Daftar seluruh siswa (mendukung filter `?search=`, `?className=`, `?status=active\|suspended`) |
+| `POST` | `/api/v1/admin/students` | ADMIN | Tambah akun siswa baru secara manual |
+| `GET` | `/api/v1/admin/students/:studentId` | ADMIN | Detail lengkap satu siswa dan 10 riwayat pesanan terakhir |
+| `PATCH` / `PUT` | `/api/v1/admin/students/:studentId` | ADMIN | Perbarui data siswa (nama, NIS, kelas, poin reward, total pelanggaran) |
+| `PATCH` | `/api/v1/admin/students/:studentId/status` | ADMIN | **Suspend atau Aktifkan** akun siswa (`isActive: true / false`) |
+| `DELETE` | `/api/v1/admin/students/:studentId` | ADMIN | Hapus akun siswa dari sistem |
+| `GET` | `/api/v1/admin/classes` | ADMIN | Rekapitulasi daftar kelas dan jumlah siswa terdaftar di setiap kelas |
+| `GET` | `/api/v1/admin/violations` | ADMIN | Daftar siswa yang memiliki catatan pelanggaran kantin |
+| `POST` | `/api/v1/admin/violations/:userId` | ADMIN | Tambahkan catatan / poin pelanggaran ke siswa |
+
+---
+
+#### Contoh Request & Response Admin:
+
+##### 1. Mendaftarkan Seller & Stand Sepaket (`POST /api/v1/admin/stands`)
+* **Header**: `Authorization: Bearer <TOKEN_ADMIN>`, `x-api-key: <KEY>`, `Content-Type: application/json`
+* **Request Body**:
+```json
+{
+  "ownerName": "Pak Joko Susanto",
+  "standName": "Warung Soto Kudus & Nasi Pecel",
+  "phoneNumber": "081298765432",
+  "counterSlot": "Stand 03",
+  "category": "Makanan"
+}
+```
+* **Response (201 Created)**:
+```json
+{
+  "status": "success",
+  "message": "Stand 'Warung Soto Kudus & Nasi Pecel' dan akun penjual 'Pak Joko Susanto' berhasil didaftarkan!",
+  "data": {
+    "id": "5c4c639b-10b1-4af4-a55d-2e6bfc4913ac",
+    "name": "Warung Soto Kudus & Nasi Pecel",
+    "standName": "Warung Soto Kudus & Nasi Pecel",
+    "counterSlot": "Stand 03",
+    "standNumber": "Stand 03",
+    "category": "Makanan",
+    "isOpen": true,
+    "rating": 4.8,
+    "ownerId": "6a8fcc35-05d5-4c39-8c0b-9e56b9f215ce",
+    "ownerName": "Pak Joko Susanto",
+    "ownerPhone": "081298765432",
+    "ownerIsActive": true
+  }
+}
+```
+
+##### 2. Rekapitulasi Pendapatan Seluruh Kantin (`GET /api/v1/admin/revenue`)
+* **Parameter Opsional**: `?startDate=2026-09-01&endDate=2026-09-30` atau `?period=today`
+* **Response (200 OK)**:
+```json
+{
+  "status": "success",
+  "data": {
+    "grossIncome": 3500000,
+    "netIncome": 3325000,
+    "koperasiFee": 175000,
+    "totalOrders": 142,
+    "standsRevenue": [
+      {
+        "standId": "5c4c639b-10b1-4af4-a55d-2e6bfc4913ac",
+        "standName": "Jus Buah Segar Bang Ijul",
+        "ownerName": "Bang Ijul",
+        "counterSlot": "Stand 01",
+        "grossIncome": 2100000,
+        "totalOrders": 85,
+        "progress": 0.60
+      },
+      {
+        "standId": "8a7c123b-55a1-4ee4-b55d-1e6bfc4919bc",
+        "standName": "Ayam Geprek Bu Sri",
+        "ownerName": "Bu Sri",
+        "counterSlot": "Stand 02",
+        "grossIncome": 1400000,
+        "totalOrders": 57,
+        "progress": 0.40
+      }
+    ]
+  }
+}
+```
+
+##### 3. Rincian Saldo Siap Cair Per Stand (`GET /api/v1/admin/revenue/:standId`)
+* **Response (200 OK)**:
+```json
+{
+  "status": "success",
+  "data": {
+    "standId": "5c4c639b-10b1-4af4-a55d-2e6bfc4913ac",
+    "standName": "Jus Buah Segar Bang Ijul",
+    "ownerName": "Bang Ijul",
+    "ownerPhone": "0881010005339",
+    "accountNumber": "Stand 01",
+    "qrisBalance": 750000,
+    "cashBalance": 1350000,
+    "readyToPayout": 750000,
+    "grossIncome": 2100000,
+    "totalOrders": 85
+  }
+}
+```
+
+##### 4. Suspend atau Aktifkan Akun Siswa (`PATCH /api/v1/admin/students/:studentId/status`)
+* **Request Body (Suspend)**:
+```json
+{
+  "isActive": false
+}
+```
+* **Response (200 OK)**:
+```json
+{
+  "status": "success",
+  "message": "Akun siswa 'Galen Alvian' berhasil disuspend (dinonaktifkan).",
+  "data": {
+    "id": "888423eb-33f2-4afa-a676-dc4ec6cb8558",
+    "fullName": "Galen Alvian",
+    "phoneNumber": "087733970522",
+    "role": "STUDENT",
+    "className": "XII RPL",
+    "points": 11,
+    "violationCount": 3,
+    "isActive": false
+  }
+}
+```
+> **Catatan Pencegahan Login**: Ketika akun siswa/pengguna berstatus `is_active = false`, sistem backend otomatis menolak permintaan OTP (`POST /api/v1/auth/request-otp`) dan proses login (`POST /api/v1/auth/verify-otp`) dengan status **`403 Forbidden`**:
+> ```json
+> {
+>   "status": "error",
+>   "message": "Akun Anda sedang dinonaktifkan (disuspend). Silakan hubungi pihak admin sekolah atau admin kantin untuk mengaktifkan kembali."
+> }
+> ```
+
+---
+
 ## Integrasi dengan Frontend Android
 
 Frontend mobile [Eight-Canteen](https://github.com/Papi0404/Eight-Canteen.git) menggunakan **Retrofit 2** dan **OkHttp 3 Interceptor** yang dikonfigurasi pada `com.januarzidanetinendeng.eightcanteen.data.remote.ApiConfig`.
@@ -523,6 +684,18 @@ ALTER TABLE menus ADD COLUMN IF NOT EXISTS image_url TEXT;
 -- 7. Tambahkan kolom 'note' untuk catatan pesanan umum & catatan item menu
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS note TEXT;
 ALTER TABLE order_items ADD COLUMN IF NOT EXISTS note TEXT;
+
+-- 8. [BARU] Tambahkan role 'ADMIN' ke enum user_role jika belum ada
+DO $$
+BEGIN
+    ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ADMIN';
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- 9. [BARU] Tambahkan kolom 'is_active' pada tabel profiles untuk fitur suspend akun (default TRUE)
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+UPDATE profiles SET is_active = TRUE WHERE is_active IS NULL;
 
 -- 7. Verifikasi bahwa bucket telah aktif
 SELECT id, name, public, file_size_limit, allowed_mime_types 

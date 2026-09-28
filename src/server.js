@@ -10,6 +10,7 @@ const userRoutes = require('./routes/userRoutes');
 const standRoutes = require('./routes/standRoutes');
 const menuRoutes = require('./routes/menuRoutes');
 const orderRoutes = require('./routes/orderRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 require('./jobs/penaltyJob');
 
@@ -68,6 +69,7 @@ app.use('/api/v1/stands', standRoutes);
 app.use('/api/v1/seller', standRoutes);
 app.use('/api/v1/menus', menuRoutes);
 app.use('/api/v1/orders', orderRoutes);
+app.use('/api/v1/admin', adminRoutes);
 
 app.listen(PORT, () => {
     console.log(`[SERVER] API berjalan di http://localhost:${PORT}`);
