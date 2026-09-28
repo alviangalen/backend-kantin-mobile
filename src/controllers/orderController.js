@@ -44,7 +44,7 @@ exports.createOrder = async (req, res) => {
 
     try {
         // 1. Ambil dan validasi semua menu dari database
-        const menuIds = items.map(it => it.menuId);
+        const menuIds = items.map(it => it.menuId || it.menu_id);
         const { data: menus, error: menuErr } = await supabase
             .from('menus')
             .select('id, price, stock, name, is_available, stand_id, stands(id, name, stand_number)')
@@ -59,7 +59,7 @@ exports.createOrder = async (req, res) => {
 
         // Validasi ketersediaan dan stok untuk setiap item di keranjang
         for (const it of items) {
-            const menu = menuMap[it.menuId];
+            const menu = menuMap[it.menuId || it.menu_id];
             if (!menu) {
                 return res.status(400).json({ status: "error", message: "Menu dengan ID " + it.menuId + " tidak ditemukan." });
             }
@@ -87,7 +87,7 @@ exports.createOrder = async (req, res) => {
                     subtotal: 0
                 };
             }
-            const itemNote = (it.note || '').toString().trim() || null;
+            const itemNote = (it.note !== undefined ? it.note : (it.notes !== undefined ? it.notes : '')).toString().trim() || null;
             itemsByStand[targetStandId].items.push({
                 menu_id: it.menuId,
                 name: menu.name,
@@ -212,10 +212,25 @@ exports.createOrder = async (req, res) => {
                 created_at: newOrder.created_at,
                 items: group.items.map(it => ({
                     menuId: it.menu_id,
+                    menu_id: it.menu_id,
+                    name: it.name,
                     menuName: it.name,
                     price: it.price_at_time,
+                    price_at_time: it.price_at_time,
                     quantity: it.quantity,
-                    note: it.note
+                    note: it.note,
+                    notes: it.note
+                })),
+                orderItems: group.items.map(it => ({
+                    menuId: it.menu_id,
+                    menu_id: it.menu_id,
+                    name: it.name,
+                    menuName: it.name,
+                    price: it.price_at_time,
+                    price_at_time: it.price_at_time,
+                    quantity: it.quantity,
+                    note: it.note,
+                    notes: it.note
                 }))
             });
         }
@@ -302,11 +317,28 @@ exports.getOrders = async (req, res) => {
             barcode: o.order_number,
             qrCode: o.order_number,
             items: (o.order_items || []).map(it => ({
+                id: it.id,
                 menuId: it.menu_id,
+                menu_id: it.menu_id,
+                name: it.menus?.name || 'Menu',
                 menuName: it.menus?.name || 'Menu',
                 price: it.price_at_time,
+                price_at_time: it.price_at_time,
                 quantity: it.quantity,
-                note: it.note || null
+                note: it.note || null,
+                notes: it.note || null
+            })),
+            orderItems: (o.order_items || []).map(it => ({
+                id: it.id,
+                menuId: it.menu_id,
+                menu_id: it.menu_id,
+                name: it.menus?.name || 'Menu',
+                menuName: it.menus?.name || 'Menu',
+                price: it.price_at_time,
+                price_at_time: it.price_at_time,
+                quantity: it.quantity,
+                note: it.note || null,
+                notes: it.note || null
             }))
         }));
 
@@ -388,11 +420,28 @@ exports.getOrderDetail = async (req, res) => {
             barcode: order.order_number,
             qrCode: order.order_number,
             items: (order.order_items || []).map(it => ({
+                id: it.id,
                 menuId: it.menu_id,
+                menu_id: it.menu_id,
+                name: it.menus?.name || 'Menu',
                 menuName: it.menus?.name || 'Menu',
                 price: it.price_at_time,
+                price_at_time: it.price_at_time,
                 quantity: it.quantity,
-                note: it.note || null
+                note: it.note || null,
+                notes: it.note || null
+            })),
+            orderItems: (order.order_items || []).map(it => ({
+                id: it.id,
+                menuId: it.menu_id,
+                menu_id: it.menu_id,
+                name: it.menus?.name || 'Menu',
+                menuName: it.menus?.name || 'Menu',
+                price: it.price_at_time,
+                price_at_time: it.price_at_time,
+                quantity: it.quantity,
+                note: it.note || null,
+                notes: it.note || null
             }))
         };
 
