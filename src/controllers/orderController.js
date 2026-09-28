@@ -11,13 +11,16 @@ exports.createOrder = async (req, res) => {
         for (const item of items) {
             const { data: menu, error } = await supabase
                 .from('menus')
-                .select('price, stock, name')
+                .select('price, stock, name, is_available')
                 .eq('id', item.menuId)
                 .single();
 
             if (error || !menu) throw new Error("Menu dengan ID " + item.menuId + " tidak ditemukan.");
-            if (menu.stock < item.quantity) {
-                return res.status(400).json({ status: "error", message: "Stok " + menu.name + " tidak mencukupi. Sisa: " + menu.stock });
+            if (menu.is_available === false) {
+                return res.status(400).json({ status: "error", message: 'Menu "' + menu.name + '" sedang tidak tersedia.' });
+            }
+            if (menu.stock <= 0 || menu.stock < item.quantity) {
+                return res.status(400).json({ status: "error", message: "Stok " + menu.name + " tidak mencukupi atau habis. Sisa: " + menu.stock });
             }
 
             totalAmount += menu.price * item.quantity;
@@ -187,11 +190,12 @@ exports.getOrderDetail = async (req, res) => {
             order_items (id, menu_id, quantity, price_at_time, menus(id, name, image_url, price))
         `);
 
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+        const cleanOrderId = (orderId || '').trim();
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanOrderId);
         if (isUuid) {
-            query = query.eq('id', orderId);
+            query = query.eq('id', cleanOrderId);
         } else {
-            query = query.eq('order_number', orderId);
+            query = query.ilike('order_number', cleanOrderId);
         }
 
         const { data: order, error } = await query.maybeSingle();
@@ -235,7 +239,8 @@ exports.getOrderDetail = async (req, res) => {
 };
 
 exports.completeOrder = async (req, res) => {
-    const identifier = req.params.orderId || req.params.orderNumber;
+    const rawId = req.params.orderId || req.params.orderNumber;
+    const identifier = (rawId || '').trim();
 
     try {
         let query = supabase.from('orders').select('*');
@@ -243,7 +248,7 @@ exports.completeOrder = async (req, res) => {
         if (isUuid) {
             query = query.eq('id', identifier);
         } else {
-            query = query.eq('order_number', identifier);
+            query = query.ilike('order_number', identifier);
         }
 
         const { data: order, error: orderErr } = await query.maybeSingle();
@@ -298,6 +303,11 @@ exports.updateOrderStatus = async (req, res) => {
         return res.status(400).json({ status: "error", message: "Status pesanan wajib diisi" });
     }
 
+    const upperStatus = status.toUpperCase();
+    if (upperStatus === 'CANCELLED') {
+        return exports.cancelOrder(req, res);
+    }
+
     try {
         let query = supabase.from('orders').select('*');
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
@@ -313,7 +323,6 @@ exports.updateOrderStatus = async (req, res) => {
         }
 
         const validStatuses = ['PENDING', 'PENDING_PAYMENT', 'COOKING', 'READY', 'READY_FOR_PICKUP', 'COMPLETED', 'CANCELLED'];
-        const upperStatus = status.toUpperCase();
         if (!validStatuses.includes(upperStatus)) {
             return res.status(400).json({ status: "error", message: "Status tidak valid" });
         }
@@ -350,3 +359,82 @@ exports.updateOrderStatus = async (req, res) => {
         res.status(500).json({ status: "error", message: err.message });
     }
 };
+
+
+exports.cancelOrder = async (req, res) => {
+    const rawId = req.params.orderId || req.params.orderNumber;
+    const identifier = (rawId || '').trim();
+    const user = req.user;
+
+    try {
+        let query = supabase.from('orders').select('*, order_items(id, menu_id, quantity)');
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+        if (isUuid) {
+            query = query.eq('id', identifier);
+        } else {
+            query = query.ilike('order_number', identifier);
+        }
+
+        const { data: order, error: orderErr } = await query.maybeSingle();
+        if (orderErr || !order) {
+            return res.status(404).json({ status: "error", message: "Pesanan tidak ditemukan" });
+        }
+
+        // Verifikasi kepemilikan jika siswa
+        if (user.role === 'STUDENT' && order.student_id !== user.id) {
+            return res.status(403).json({ status: "error", message: "Anda tidak memiliki akses untuk membatalkan pesanan ini" });
+        }
+
+        if (order.status === 'CANCELLED') {
+            return res.status(400).json({ status: "error", message: "Pesanan ini sudah dibatalkan sebelumnya" });
+        }
+
+        // Pesanan hanya bisa dibatalkan jika belum dimasak atau belum selesai
+        if (order.status === 'COOKING' || order.status === 'COMPLETED') {
+            return res.status(400).json({
+                status: "error",
+                message: "Pesanan tidak dapat dibatalkan karena pesanan sudah " + (order.status === 'COOKING' ? "sedang dimasak/dipersiapkan" : "selesai") + "."
+            });
+        }
+
+        // 1. Ubah status pesanan menjadi CANCELLED
+        const { error: updateErr } = await supabase
+            .from('orders')
+            .update({ status: 'CANCELLED', updated_at: new Date() })
+            .eq('id', order.id);
+
+        if (updateErr) throw updateErr;
+
+        // 2. Kembalikan stok menu
+        const items = order.order_items || [];
+        for (const it of items) {
+            if (it.menu_id && it.quantity > 0) {
+                const { data: m } = await supabase.from('menus').select('stock').eq('id', it.menu_id).maybeSingle();
+                if (m) {
+                    await supabase.from('menus').update({ stock: m.stock + it.quantity }).eq('id', it.menu_id);
+                }
+            }
+        }
+
+        // 3. Kembalikan poin jika menggunakan poin
+        if (order.used_points > 0) {
+            const { data: student } = await supabase.from('profiles').select('points').eq('id', order.student_id).maybeSingle();
+            if (student) {
+                await supabase.from('profiles').update({ points: (student.points || 0) + order.used_points }).eq('id', order.student_id);
+            }
+        }
+
+        res.status(200).json({
+            status: "success",
+            message: "Pesanan " + order.order_number + " berhasil dibatalkan.",
+            data: {
+                id: order.id,
+                orderNumber: order.order_number,
+                status: 'CANCELLED'
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ status: "error", message: err.message });
+    }
+};
+
