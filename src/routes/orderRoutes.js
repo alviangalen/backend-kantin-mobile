@@ -13,6 +13,10 @@ router.get('/', auth.protect, orderController.getOrders);
 // Endpoint Detail Satu Pesanan
 router.get('/:orderId', auth.protect, orderController.getOrderDetail);
 
+// Endpoint Tambah / Perbarui Catatan Pesanan
+router.patch('/:orderId/note', auth.protect, orderController.updateOrderNote);
+router.put('/:orderId/note', auth.protect, orderController.updateOrderNote);
+
 // Endpoint Pembatalan Pesanan oleh Siswa / Penjual / Admin
 router.patch('/:orderId/cancel', auth.protect, orderController.cancelOrder);
 router.post('/:orderId/cancel', auth.protect, orderController.cancelOrder);

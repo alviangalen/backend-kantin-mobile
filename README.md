@@ -123,7 +123,9 @@ graph TD
 * **Validasi Format Ketat**: Hanya mendukung format **JPG, JPEG, PNG, dan WEBP** dengan ukuran maksimal **5 MB**. File tidak valid otomatis ditolak dengan pesan error yang jelas.
 * **Pembersihan Otomatis (*Auto Clean-up*)**: Ketika foto produk diganti atau menu dihapus, file gambar lama di Supabase Storage otomatis dihapus untuk mencegah penumpukan file sampah.
 
-### 4. Pemesanan Cerdas & Pengurangan Stok Real-time
+### 4. Pemesanan Cerdas, Catatan Kustom & Pengurangan Stok Real-time
+* **Catatan Pemesanan (Order Note)**: Siswa dapat menambahkan catatan khusus ke penjual saat checkout (seperti 'Pedas ya bang', 'Es batunya sedikit', 'Jangan pakai daun bawang'), baik pada tingkat pesanan umum maupun per item menu.
+* **Pembaruan Catatan**: Catatan dapat diperbarui sebelum pesanan dimasak melalui endpoint `PATCH /api/v1/orders/:orderId/note`.
 * Pengecekan stok otomatis sebelum pesanan dibuat (mencegah *overselling*).
 * Pengurangan stok menu secara atomik saat checkout berhasil.
 * Format nomor pesanan otomatis yang mudah dibedakan:
@@ -173,6 +175,7 @@ backend-kantin-mobile/
 │   │   ├── storageService.js    # Service upload & hapus foto di Supabase Storage
 │   │   └── whatsappService.js   # Service pengiriman OTP via Fonnte API
 │   └── server.js                # Server Express, konfigurasi middleware, & routing
+├── add_order_note_column.sql    # Query SQL Editor tambah kolom catatan pesanan (note)
 ├── supabase_storage_setup.sql   # Query SQL Editor setup bucket 'menu-images' & RLS
 ├── .env.example                 # Template konfigurasi environment
 ├── package.json                 # Dependensi & script eksekusi (express, multer, supabase)
@@ -373,9 +376,10 @@ Content-Type: `multipart/form-data`
 
 | Method | Endpoint | Auth | Role | Deskripsi |
 |---|---|---|---|---|
-| `POST` | `/api/v1/orders/checkout` | Bearer | STUDENT | Buat pesanan baru & kurangi stok otomatis |
-| `GET` | `/api/v1/orders` | Bearer | Semua | Riwayat pesanan (filter otomatis sesuai role & query `?status=`) |
-| `GET` | `/api/v1/orders/:orderId` | Bearer | Semua | Detail lengkap pesanan, item, dan kode barcode/QR |
+| `POST` | `/api/v1/orders/checkout` | Bearer | STUDENT | Buat pesanan baru dengan catatan kustom (`note`) & kurangi stok otomatis |
+| `GET` | `/api/v1/orders` | Bearer | Semua | Riwayat pesanan (menampilkan catatan pesanan umum & per item menu) |
+| `GET` | `/api/v1/orders/:orderId` | Bearer | Semua | Detail lengkap pesanan, catatan (`note`), item, dan kode barcode/QR |
+| `PATCH` / `PUT` | `/api/v1/orders/:orderId/note` | Bearer | STUDENT, SELLER | **[BARU]** Tambah atau perbarui catatan khusus pesanan |
 | `PATCH` / `PUT` | `/api/v1/orders/:orderId/status`| Bearer | SELLER, ADMIN | Perbarui status proses masak/siap diambil |
 | `PATCH` | `/api/v1/orders/:orderId/pickup`| Bearer | SELLER, ADMIN | Konfirmasi pesanan selesai (`COMPLETED`) & berikan poin |
 
@@ -515,6 +519,10 @@ END $$;
 
 -- 6. Pastikan kolom image_url pada tabel 'menus' telah tersedia
 ALTER TABLE menus ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- 7. Tambahkan kolom 'note' untuk catatan pesanan umum & catatan item menu
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS note TEXT;
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS note TEXT;
 
 -- 7. Verifikasi bahwa bucket telah aktif
 SELECT id, name, public, file_size_limit, allowed_mime_types 
