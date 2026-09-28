@@ -4,92 +4,172 @@ exports.createOrder = async (req, res) => {
     const { standId, items, paymentMethod, usePoints } = req.body;
     const studentId = req.user.id;
 
+    if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ status: "error", message: "Keranjang pesanan kosong." });
+    }
+
     try {
-        let totalAmount = 0;
-        const orderItemsData = [];
+        // 1. Ambil dan validasi semua menu dari database
+        const menuIds = items.map(it => it.menuId);
+        const { data: menus, error: menuErr } = await supabase
+            .from('menus')
+            .select('id, price, stock, name, is_available, stand_id, stands(id, name, stand_number)')
+            .in('id', menuIds);
 
-        for (const item of items) {
-            const { data: menu, error } = await supabase
-                .from('menus')
-                .select('price, stock, name, is_available')
-                .eq('id', item.menuId)
-                .single();
+        if (menuErr || !menus) throw new Error("Gagal mengambil data menu dari database.");
 
-            if (error || !menu) throw new Error("Menu dengan ID " + item.menuId + " tidak ditemukan.");
+        const menuMap = {};
+        for (const m of menus) {
+            menuMap[m.id] = m;
+        }
+
+        // Validasi ketersediaan dan stok untuk setiap item di keranjang
+        for (const it of items) {
+            const menu = menuMap[it.menuId];
+            if (!menu) {
+                return res.status(400).json({ status: "error", message: "Menu dengan ID " + it.menuId + " tidak ditemukan." });
+            }
             if (menu.is_available === false) {
                 return res.status(400).json({ status: "error", message: 'Menu "' + menu.name + '" sedang tidak tersedia.' });
             }
-            if (menu.stock <= 0 || menu.stock < item.quantity) {
+            if (menu.stock <= 0 || menu.stock < it.quantity) {
                 return res.status(400).json({ status: "error", message: "Stok " + menu.name + " tidak mencukupi atau habis. Sisa: " + menu.stock });
             }
-
-            totalAmount += menu.price * item.quantity;
-            orderItemsData.push({
-                menu_id: item.menuId,
-                quantity: item.quantity,
-                price_at_time: menu.price
-            });
         }
 
-        let usedPoints = 0;
-        let earnedPoints = 0;
+        // 2. Kelompokkan item berdasarkan stand_id menu
+        const itemsByStand = {};
+        for (const it of items) {
+            const menu = menuMap[it.menuId];
+            const targetStandId = menu.stand_id || standId;
+            if (!targetStandId) {
+                return res.status(400).json({ status: "error", message: "Stand untuk menu " + menu.name + " tidak terdefinisi." });
+            }
+            if (!itemsByStand[targetStandId]) {
+                itemsByStand[targetStandId] = {
+                    standId: targetStandId,
+                    standName: menu.stands?.name || "Stand Kantin",
+                    items: [],
+                    subtotal: 0
+                };
+            }
+            itemsByStand[targetStandId].items.push({
+                menu_id: it.menuId,
+                name: menu.name,
+                quantity: it.quantity,
+                price_at_time: menu.price,
+                note: it.note || null
+            });
+            itemsByStand[targetStandId].subtotal += menu.price * it.quantity;
+        }
 
+        // 3. Tangani pemotongan poin (jika usePoints = true)
+        let totalUsedPoints = 0;
+        let remainingDiscount = 0;
         if (usePoints) {
             const { data: student } = await supabase.from('profiles').select('points').eq('id', studentId).single();
-            
             if (student && student.points >= 20) {
-                usedPoints = 20;
-                totalAmount = Math.max(0, totalAmount - 10000); 
+                totalUsedPoints = 20;
+                remainingDiscount = 10000;
                 await supabase.from('profiles').update({ points: student.points - 20 }).eq('id', studentId);
             } else {
                 return res.status(400).json({ status: "error", message: "Poin tidak mencukupi (Minimal 20 Poin)." });
             }
-        } else {
-            earnedPoints = Math.floor(totalAmount / 10000);
         }
 
-        // Normalisasi payment method: jika TUNAI / CASH disimpan sebagai 'CASH', jika QRIS disimpan sebagai 'QRIS'
+        // 4. Normalisasi metode pembayaran
         const methodUpper = (paymentMethod || 'CASH').toString().toUpperCase().trim();
         const isQris = methodUpper === 'QRIS';
         const dbPaymentMethod = isQris ? 'QRIS' : 'CASH';
-
         const prefix = isQris ? 'Q' : 'C';
-        const randomNum = Math.floor(1000 + Math.random() * 9000);
-        const orderNumber = prefix + "-" + randomNum;
-        const { data: newOrder, error: orderError } = await supabase
-            .from('orders')
-            .insert([{
-                order_number: orderNumber,
-                student_id: studentId,
-                stand_id: standId,
-                total_amount: totalAmount,
-                payment_method: dbPaymentMethod,
-                status: isQris ? 'PENDING_PAYMENT' : 'READY_FOR_PICKUP',
-                used_points: usedPoints,
-                earned_points: earnedPoints
-            }])
-            .select()
-            .single();
 
-        if (orderError) throw orderError;
+        const standKeys = Object.keys(itemsByStand);
+        const createdOrders = [];
 
-        for (const item of orderItemsData) {
-            item.order_id = newOrder.id; 
-            await supabase.from('order_items').insert([item]);
-            
-            const { data: currentMenu } = await supabase.from('menus').select('stock').eq('id', item.menu_id).single();
-            if (currentMenu) {
-                await supabase.from('menus').update({ stock: Math.max(0, currentMenu.stock - item.quantity) }).eq('id', item.menu_id);
+        // 5. Buat order terpisah untuk masing-masing stand
+        for (const sId of standKeys) {
+            const group = itemsByStand[sId];
+            let orderDiscount = 0;
+            if (remainingDiscount > 0) {
+                orderDiscount = Math.min(group.subtotal, remainingDiscount);
+                remainingDiscount -= orderDiscount;
             }
+
+            const standFinalTotal = Math.max(0, group.subtotal - orderDiscount);
+            const standUsedPoints = orderDiscount > 0 ? totalUsedPoints : 0;
+            const standEarnedPoints = Math.floor(standFinalTotal / 10000);
+
+            const randomNum = Math.floor(1000 + Math.random() * 9000);
+            const orderNumber = prefix + "-" + randomNum;
+
+            const { data: newOrder, error: orderError } = await supabase
+                .from('orders')
+                .insert([{
+                    order_number: orderNumber,
+                    student_id: studentId,
+                    stand_id: sId,
+                    total_amount: standFinalTotal,
+                    payment_method: dbPaymentMethod,
+                    status: isQris ? 'PENDING_PAYMENT' : 'READY_FOR_PICKUP',
+                    used_points: standUsedPoints,
+                    earned_points: standEarnedPoints
+                }])
+                .select('*, stands (id, name, stand_number)')
+                .single();
+
+            if (orderError) throw orderError;
+
+            // Masukkan order_items & kurangi stok
+            for (const item of group.items) {
+                await supabase.from('order_items').insert([{
+                    order_id: newOrder.id,
+                    menu_id: item.menu_id,
+                    quantity: item.quantity,
+                    price_at_time: item.price_at_time
+                }]);
+
+                const { data: cur } = await supabase.from('menus').select('stock').eq('id', item.menu_id).single();
+                if (cur) {
+                    await supabase.from('menus').update({ stock: Math.max(0, cur.stock - item.quantity) }).eq('id', item.menu_id);
+                }
+            }
+
+            createdOrders.push({
+                ...newOrder,
+                id: newOrder.id,
+                orderNumber: newOrder.order_number,
+                order_number: newOrder.order_number,
+                standId: newOrder.stand_id,
+                standName: newOrder.stands?.name || group.standName,
+                totalAmount: newOrder.total_amount,
+                total_amount: newOrder.total_amount,
+                paymentMethod: paymentMethod || dbPaymentMethod,
+                payment_method: newOrder.payment_method,
+                status: newOrder.status,
+                barcode: newOrder.order_number,
+                qrCode: newOrder.order_number,
+                createdAt: newOrder.created_at,
+                created_at: newOrder.created_at,
+                items: group.items.map(it => ({
+                    menuId: it.menu_id,
+                    menuName: it.name,
+                    price: it.price_at_time,
+                    quantity: it.quantity
+                }))
+            });
         }
 
+        const isMulti = createdOrders.length > 1;
         res.status(201).json({
             status: "success",
-            message: "Pesanan berhasil dibuat!",
+            message: isMulti
+                ? createdOrders.length + " pesanan berhasil dibuat untuk stand berbeda!"
+                : "Pesanan berhasil dibuat!",
             data: {
-                ...newOrder,
-                orderNumber: newOrder.order_number,
-                paymentMethod: paymentMethod || dbPaymentMethod
+                ...createdOrders[0],
+                orderNumber: createdOrders[0].order_number,
+                paymentMethod: paymentMethod || dbPaymentMethod,
+                orders: createdOrders
             }
         });
 
@@ -153,6 +233,8 @@ exports.getOrders = async (req, res) => {
             status: o.status,
             createdAt: o.created_at,
             created_at: o.created_at,
+            barcode: o.order_number,
+            qrCode: o.order_number,
             items: (o.order_items || []).map(it => ({
                 menuId: it.menu_id,
                 menuName: it.menus?.name || 'Menu',
@@ -172,6 +254,7 @@ exports.getOrders = async (req, res) => {
 
 exports.getOrderDetail = async (req, res) => {
     const { orderId } = req.params;
+    const user = req.user;
 
     try {
         let query = supabase.from('orders').select(`
@@ -199,8 +282,26 @@ exports.getOrderDetail = async (req, res) => {
         }
 
         const { data: order, error } = await query.maybeSingle();
+
         if (error || !order) {
             return res.status(404).json({ status: "error", message: "Pesanan tidak ditemukan" });
+        }
+
+        // Verifikasi kepemilikan untuk SELLER
+        if (user && user.role === 'SELLER') {
+            const { data: sellerStand } = await supabase
+                .from('stands')
+                .select('id, name')
+                .eq('owner_id', user.id)
+                .maybeSingle();
+
+            if (sellerStand && order.stand_id !== sellerStand.id) {
+                const targetStandName = order.stands?.name || 'stand lain';
+                return res.status(403).json({
+                    status: "error",
+                    message: "Pesanan #" + order.order_number + " adalah milik " + targetStandName + ", bukan stand Anda (" + sellerStand.name + ")."
+                });
+            }
         }
 
         const formatted = {
@@ -241,9 +342,10 @@ exports.getOrderDetail = async (req, res) => {
 exports.completeOrder = async (req, res) => {
     const rawId = req.params.orderId || req.params.orderNumber;
     const identifier = (rawId || '').trim();
+    const user = req.user;
 
     try {
-        let query = supabase.from('orders').select('*');
+        let query = supabase.from('orders').select('*, stands (id, name, stand_number)');
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
         if (isUuid) {
             query = query.eq('id', identifier);
@@ -257,8 +359,36 @@ exports.completeOrder = async (req, res) => {
             return res.status(404).json({ status: "error", message: "Pesanan tidak ditemukan" });
         }
 
+        // VALIDASI KETAT: Penjual TIDAK BISA scan pesanan milik stand lain!
+        if (user && user.role === 'SELLER') {
+            const { data: sellerStand } = await supabase
+                .from('stands')
+                .select('id, name')
+                .eq('owner_id', user.id)
+                .maybeSingle();
+
+            if (!sellerStand) {
+                return res.status(403).json({
+                    status: "error",
+                    message: "Akun penjual tidak terhubung dengan stand manapun."
+                });
+            }
+
+            if (order.stand_id !== sellerStand.id) {
+                const targetStandName = order.stands?.name || "stand lain";
+                return res.status(403).json({
+                    status: "error",
+                    message: "Pesanan #" + order.order_number + " adalah milik \"" + targetStandName + "\", bukan stand Anda (\"" + sellerStand.name + "\"). Anda hanya dapat memproses pesanan untuk stand Anda sendiri."
+                });
+            }
+        }
+
         if (order.status === 'COMPLETED') {
             return res.status(400).json({ status: "error", message: "Pesanan ini sudah diselesaikan sebelumnya" });
+        }
+
+        if (order.status === 'CANCELLED') {
+            return res.status(400).json({ status: "error", message: "Pesanan ini sudah dibatalkan sebelumnya" });
         }
 
         await supabase
@@ -298,6 +428,7 @@ exports.completeOrder = async (req, res) => {
 exports.updateOrderStatus = async (req, res) => {
     const identifier = req.params.orderId;
     const { status } = req.body;
+    const user = req.user;
 
     if (!status) {
         return res.status(400).json({ status: "error", message: "Status pesanan wajib diisi" });
@@ -309,7 +440,7 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     try {
-        let query = supabase.from('orders').select('*');
+        let query = supabase.from('orders').select('*, stands (id, name, stand_number)');
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
         if (isUuid) {
             query = query.eq('id', identifier);
@@ -320,6 +451,23 @@ exports.updateOrderStatus = async (req, res) => {
         const { data: order, error: orderErr } = await query.maybeSingle();
         if (orderErr || !order) {
             return res.status(404).json({ status: "error", message: "Pesanan tidak ditemukan" });
+        }
+
+        // VALIDASI KETAT: Penjual TIDAK BISA update status pesanan milik stand lain!
+        if (user && user.role === 'SELLER') {
+            const { data: sellerStand } = await supabase
+                .from('stands')
+                .select('id, name')
+                .eq('owner_id', user.id)
+                .maybeSingle();
+
+            if (!sellerStand || order.stand_id !== sellerStand.id) {
+                const targetStandName = order.stands?.name || "stand lain";
+                return res.status(403).json({
+                    status: "error",
+                    message: "Pesanan #" + order.order_number + " adalah milik \"" + targetStandName + "\", bukan stand Anda (\"" + (sellerStand ? sellerStand.name : 'Unknown') + "\")."
+                });
+            }
         }
 
         const validStatuses = ['PENDING', 'PENDING_PAYMENT', 'COOKING', 'READY', 'READY_FOR_PICKUP', 'COMPLETED', 'CANCELLED'];
@@ -359,7 +507,6 @@ exports.updateOrderStatus = async (req, res) => {
         res.status(500).json({ status: "error", message: err.message });
     }
 };
-
 
 exports.cancelOrder = async (req, res) => {
     const rawId = req.params.orderId || req.params.orderNumber;
@@ -437,4 +584,3 @@ exports.cancelOrder = async (req, res) => {
         res.status(500).json({ status: "error", message: err.message });
     }
 };
-
