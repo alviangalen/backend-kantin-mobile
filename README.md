@@ -8,6 +8,7 @@
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white" alt="Node.js" /></a>
   <a href="https://expressjs.com/"><img src="https://img.shields.io/badge/Express.js-5.x-000000?logo=express&logoColor=white" alt="Express.js" /></a>
   <a href="https://supabase.com/"><img src="https://img.shields.io/badge/Database-Supabase%20(PostgreSQL)-3ECF8E?logo=supabase&logoColor=white" alt="Supabase" /></a>
+  <a href="https://supabase.com/storage"><img src="https://img.shields.io/badge/Storage-Supabase%20Storage%20(5MB)-3ECF8E?logo=supabase&logoColor=white" alt="Supabase Storage" /></a>
   <a href="https://jwt.io/"><img src="https://img.shields.io/badge/Auth-JWT%20%26%20WhatsApp%20OTP-FF6C37?logo=jsonwebtokens&logoColor=white" alt="JWT Auth" /></a>
   <a href="https://fonnte.com/"><img src="https://img.shields.io/badge/Gateway-Fonnte%20WhatsApp-25D366?logo=whatsapp&logoColor=white" alt="Fonnte WhatsApp" /></a>
   <img src="https://img.shields.io/badge/License-ISC-blue.svg" alt="License" />
@@ -26,36 +27,37 @@ Layanan backend ini dirancang khusus untuk menjadi *backend service* utama bagi 
 
 ## Daftar Isi
 
-1. [Tentang Layanan Backend](#-tentang-layanan-backend)
-2. [Arsitektur Sistem & Alur Data](#️-arsitektur-sistem--alur-data)
-3. [Fitur Utama](#-fitur-utama)
-4. [Struktur Direktori](#-struktur-direktori)
-5. [Spesifikasi & Dokumentasi API](#-spesifikasi--dokumentasi-api)
+1. [Tentang Layanan Backend](#tentang-layanan-backend)
+2. [Arsitektur Sistem & Alur Data](#arsitektur-sistem--alur-data)
+3. [Fitur Utama](#fitur-utama)
+4. [Struktur Direktori](#struktur-direktori)
+5. [Spesifikasi & Dokumentasi API](#spesifikasi--dokumentasi-api)
    - [Header Wajib](#header-wajib)
    - [Format Respon Standar](#format-respon-standar)
    - [1. Health Check](#1-health-check)
    - [2. Autentikasi & OTP (/api/v1/auth)](#2-autentikasi--otp-apiv1auth)
    - [3. Profil Pengguna (/api/v1/users)](#3-profil-pengguna-apiv1users)
    - [4. Stand & Toko Kantin (/api/v1/stands & /api/v1/seller)](#4-stand--toko-kantin-apiv1stands--apiv1seller)
-   - [5. Katalog Menu & Stok (/api/v1/menus)](#5-katalog-menu--stok-apiv1menus)
+   - [5. Katalog Menu, Stok & Foto Produk (/api/v1/menus)](#5-katalog-menu-stok--foto-produk-apiv1menus)
    - [6. Pesanan & Checkout (/api/v1/orders)](#6-pesanan--checkout-apiv1orders)
-6. [Integrasi dengan Frontend Android](#-integrasi-dengan-frontend-android)
-7. [Instalasi & Pengaturan Lokal](#️-instalasi--pengaturan-lokal)
-8. [Konfigurasi Environment (.env)](#-konfigurasi-environment-env)
-9. [Skema Database (Supabase)](#-skema-database-supabase)
-10. [Background Cron Job (Patroli Penalti)](#-background-cron-job-patroli-penalti)
-11. [Deployment ke Cloud (Render)](#️-deployment-ke-cloud-render)
-12. [Tim Pengembang](#-tim-pengembang)
-13. [Lisensi](#-lisensi)
+6. [Integrasi dengan Frontend Android](#integrasi-dengan-frontend-android)
+7. [Instalasi & Pengaturan Lokal](#instalasi--pengaturan-lokal)
+8. [Konfigurasi Environment (.env)](#konfigurasi-environment-env)
+9. [Skema Database & Supabase Storage (SQL Editor)](#skema-database--supabase-storage-sql-editor)
+10. [Background Cron Job (Patroli Penalti)](#background-cron-job-patroli-penalti)
+11. [Deployment ke Cloud (Render)](#deployment-ke-cloud-render)
+12. [Tim Pengembang](#tim-pengembang)
+13. [Lisensi](#lisensi)
 
 ---
 
 ## Tentang Layanan Backend
 
-**Eight Canteen Backend API** adalah web service modern berbasis **Node.js** dan **Express.js (v5)** yang terintegrasi dengan **Supabase PostgreSQL** sebagai database utama dan **Fonnte Gateway** untuk pengiriman verifikasi OTP WhatsApp.
+**Eight Canteen Backend API** adalah web service modern berbasis **Node.js** dan **Express.js (v5)** yang terintegrasi dengan **Supabase PostgreSQL** sebagai database utama, **Supabase Storage** untuk hosting foto produk, dan **Fonnte Gateway** untuk pengiriman verifikasi OTP WhatsApp.
 
-Layanan ini mengelola seluruh proses transaksi kantin sekolah secara digital:
-* **Bebas Antre**: Pesanan dilakukan melalui aplikasi Android sebelum jam istirahat.
+Layanan ini mengelola seluruh proses operasional kantin sekolah secara digital:
+* **Bebas Antre**: Siswa memesan makanan/minuman langsung dari ponsel pintar.
+* **Manajemen Foto Produk**: Penjual dapat mengunggah dan mengelola foto makanan/minuman dengan format yang divalidasi secara ketat (**JPG, JPEG, PNG, WEBP**; maks 5MB) dan disimpan di Supabase Storage.
 * **Metode Bayar Ganda**: Mendukung pembayaran non-tunai (QRIS) dan tunai di kasir (CASH).
 * **Manajemen Dapur**: Penjual stand menerima notifikasi pesanan masuk, mengelola antrean masak (*COOKING*), hingga menyatakan pesanan siap diambil (*READY_FOR_PICKUP*).
 * **Anti Hit & Run**: Pembatalan otomatis dan sanksi pelanggaran (*violation count*) bagi pesanan tunai yang ditinggalkan tanpa pembayaran.
@@ -75,18 +77,20 @@ graph TD
         Gateway --> RL["Rate Limiter (100 req/min)"]
         Gateway --> AK["x-api-key Validator"]
         Gateway --> JWT["JWT Auth & RBAC Guard"]
+        Gateway --> UP["Multer Upload Middleware (JPG/PNG/WEBP, Max 5MB)"]
     end
 
     subgraph Handlers ["Controller Logic"]
         JWT --> AC["authController.js"]
         JWT --> SC["standController.js"]
-        JWT --> MC["menuController.js"]
+        UP --> MC["menuController.js"]
         JWT --> OC["orderController.js"]
     end
 
     subgraph ExternalServices ["Basis Data & Layanan Eksternal"]
         AC -->|"Kirim 4-Digit OTP"| Fonnte["Fonnte WhatsApp API"]
-        AC & SC & MC & OC -->|"Query & Realtime Transaction"| Supabase[("Supabase PostgreSQL Cloud")]
+        MC -->|"Upload & Hapus Gambar"| Storage["Supabase Storage (menu-images)"]
+        AC & SC & MC & OC -->|"Query & Transaksi"| Supabase[("Supabase PostgreSQL Cloud")]
     end
 
     subgraph Scheduler ["Background Scheduler"]
@@ -99,52 +103,46 @@ graph TD
 ## Fitur Utama
 
 ### 1. Autentikasi Passwordless WhatsApp OTP
-* Login cepat dan praktis tanpa kata sandi rumit. Cukup menggunakan nomor telepon WhatsApp.
+* Login cepat dan praktis tanpa kata sandi rumit menggunakan nomor WhatsApp.
 * Menggunakan layanan **Fonnte WhatsApp API Gateway**.
 * Mekanisme normalisasi nomor telepon Indonesia cerdas (mengenali `08...`, `628...`, `+628...`, maupun nomor tanpa awalan).
 * Pengiriman 4-digit kode OTP dengan masa kedaluwarsa 5 menit.
-* Deteksi otomatis profil pengguna baru (`isNewUser`) untuk diarahkan ke alur pengisian profil (Nama, Kelas, NIS/Stand).
-* Menghasilkan token JWT dengan masa aktif **7 hari**.
+* Deteksi otomatis profil pengguna baru (`isNewUser`) untuk diarahkan ke alur pengisian profil.
+* Token JWT dengan masa aktif **7 hari**.
 
 ### 2. Role-Based Access Control (RBAC)
-* **`STUDENT` (Siswa)**:
-  - Menjelajahi daftar stand dan katalog menu aktif.
-  - Melakukan checkout pemesanan (QRIS atau Tunai).
-  - Menukarkan poin reward untuk diskon tagihan.
-  - Memantau status pesanan dan kode booking transaksi.
-* **`SELLER` (Penjual Stand)**:
-  - Mengelola informasi stand (nama stand, counter slot, kategori, buka/tutup toko).
-  - CRUD menu makanan/minuman dan memperbarui stok seketika.
-  - Memproses alur pesanan dapur (`COOKING` -> `READY_FOR_PICKUP` -> `COMPLETED`).
-  - Rekapitulasi pendapatan harian, pesanan selesai, dan riwayat transaksi.
-* **`ADMIN` (Pengelola Koperasi / Sekolah)**:
-  - Memantau omset seluruh stan kantin.
-  - Mengawasi catatan sanksi pelanggaran (*violations*) siswa.
+* **`STUDENT` (Siswa)**: Menjelajahi daftar stand dan menu aktif, checkout pesanan, tukar poin reward, pantau status pesanan & barcode.
+* **`SELLER` (Penjual Stand)**: Kelola profil stand, CRUD menu & foto produk, update stok real-time, proses antrean pesanan, dan monitoring omset harian.
+* **`ADMIN` (Pengelola Koperasi / Sekolah)**: Memantau omset seluruh stan kantin dan mengelola catatan sanksi pelanggaran siswa.
 
-### 3. Pemesanan Cerdas & Pengurangan Stok Real-time
+### 3. Upload & Manajemen Foto Produk (CRUD Foto)
+* Penjual dapat **mengunggah foto produk langsung saat menambahkan menu** baru (`POST /api/v1/menus` via `multipart/form-data`).
+* Tersedia juga endpoint **upload mandiri** (`POST /api/v1/menus/upload-image`) untuk mendapatkan URL publik Supabase Storage sebelum menyimpan menu.
+* **Pembaruan Foto Khusus** (`POST/PUT /api/v1/menus/:menuId/image`) untuk mengganti foto produk yang sudah ada secara instan.
+* **Penghapusan Foto Khusus** (`DELETE /api/v1/menus/:menuId/image`) untuk mencabut foto dari produk (set `image_url = null`).
+* **Validasi Format Ketat**: Hanya mendukung format **JPG, JPEG, PNG, dan WEBP** dengan ukuran maksimal **5 MB**. File tidak valid otomatis ditolak dengan pesan error yang jelas.
+* **Pembersihan Otomatis (*Auto Clean-up*)**: Ketika foto produk diganti atau menu dihapus, file gambar lama di Supabase Storage otomatis dihapus untuk mencegah penumpukan file sampah.
+
+### 4. Pemesanan Cerdas & Pengurangan Stok Real-time
 * Pengecekan stok otomatis sebelum pesanan dibuat (mencegah *overselling*).
 * Pengurangan stok menu secara atomik saat checkout berhasil.
 * Format nomor pesanan otomatis yang mudah dibedakan:
   - **`Q-XXXX`**: Pesanan pembayaran **QRIS** (Status awal: `PENDING_PAYMENT`).
   - **`C-XXXX`**: Pesanan pembayaran **Tunai di Kasir** (Status awal: `READY_FOR_PICKUP`).
 
-### 4. Sistem Poin Reward & Loyalty
+### 5. Sistem Poin Reward & Loyalty
 * **Perolehan Poin**: Setiap transaksi kelipatan **Rp 10.000** menghasilkan **1 Poin Reward**.
 * **Penukaran Poin**: Siswa dapat menukarkan **20 Poin** untuk mendapatkan potongan harga **Rp 10.000** langsung di halaman checkout (`usePoints: true`).
-* Poin reward dikreditkan ke akun siswa secara otomatis ketika pesanan telah diselesaikan (*COMPLETED*) oleh penjual.
+* Poin reward dikreditkan ke akun siswa secara otomatis ketika pesanan diselesaikan (*COMPLETED*) oleh penjual.
 
-### 5. Patroli Otomatis Anti Hit & Run (Cron Job)
-* Seringkali siswa memesan dengan metode bayar tunai (CASH) tetapi tidak mengambil dan tidak membayar hingga jam pulang sekolah.
+### 6. Patroli Otomatis Anti Hit & Run (Cron Job)
 * Sistem menjalankan patroli otomatis setiap hari pukul **15:00 WIB** (`Asia/Jakarta`).
-* Setiap pesanan berstatus `READY_FOR_PICKUP` dengan metode `CASH` yang belum diambil akan:
-  1. Diubah statusnya menjadi `CANCELLED`.
-  2. Akun siswa dikenakan sanksi dengan menaikkan counter `violation_count` (+1).
+* Pesanan tunai (`CASH`) yang masih berstatus `READY_FOR_PICKUP` hingga sore hari akan otomatis diubah menjadi `CANCELLED`, dan akun siswa dikenakan sanksi dengan menaikkan counter `violation_count` (+1).
 
-### 6. Keamanan & Perlindungan API
+### 7. Keamanan & Perlindungan API
 * **API Secret Key**: Seluruh endpoint non-healthcheck diwajibkan menyertakan header `x-api-key` yang cocok dengan `APP_SECRET_KEY` server.
-* **Rate Limiting**: Dibatasi maksimal **100 permintaan per menit per alamat IP** untuk mencegah serangan brute-force OTP dan spam request.
-* **Helmet**: Pengamanan header HTTP standar industri.
-* **CORS**: Pengaturan izin origin domain.
+* **Rate Limiting**: Dibatasi maksimal **100 permintaan per menit per alamat IP**.
+* **Helmet & CORS**: Standar pengamanan HTTP header dan pengawasan akses origin.
 
 ---
 
@@ -157,24 +155,27 @@ backend-kantin-mobile/
 │   │   └── database.js          # Inisialisasi Supabase Client SDK
 │   ├── controllers/
 │   │   ├── authController.js    # Logic OTP WA, verifikasi, registrasi, & profil
-│   │   ├── menuController.js    # CRUD menu makanan, ketersediaan, & update stok
+│   │   ├── menuController.js    # CRUD menu makanan, upload foto produk, & update stok
 │   │   ├── orderController.js   # Checkout, kalkulasi poin, riwayat, status, & pickup
 │   │   └── standController.js   # Browse stand, profile stand seller, & rekap omset
 │   ├── jobs/
 │   │   └── penaltyJob.js        # Scheduled Cron Job (Patroli hit & run pukul 15:00 WIB)
 │   ├── middlewares/
-│   │   └── authMiddleware.js    # Verifikasi token JWT & otorisasi role pengguna
+│   │   ├── authMiddleware.js    # Verifikasi token JWT & otorisasi role pengguna
+│   │   └── uploadMiddleware.js  # Filter validasi foto (JPG, PNG, WEBP) & limit 5MB
 │   ├── routes/
 │   │   ├── authRoutes.js        # Route /api/v1/auth
-│   │   ├── menuRoutes.js        # Route /api/v1/menus
+│   │   ├── menuRoutes.js        # Route /api/v1/menus (termasuk upload foto produk)
 │   │   ├── orderRoutes.js       # Route /api/v1/orders
 │   │   ├── standRoutes.js       # Route /api/v1/stands & /api/v1/seller
 │   │   └── userRoutes.js        # Route /api/v1/users
 │   ├── services/
+│   │   ├── storageService.js    # Service upload & hapus foto di Supabase Storage
 │   │   └── whatsappService.js   # Service pengiriman OTP via Fonnte API
 │   └── server.js                # Server Express, konfigurasi middleware, & routing
+├── supabase_storage_setup.sql   # Query SQL Editor setup bucket 'menu-images' & RLS
 ├── .env.example                 # Template konfigurasi environment
-├── package.json                 # Konfigurasi dependensi Node.js
+├── package.json                 # Dependensi & script eksekusi (express, multer, supabase)
 └── render.yaml                  # Konfigurasi deployment web service di Render
 ```
 
@@ -187,7 +188,6 @@ backend-kantin-mobile/
 Untuk seluruh endpoint API (kecuali healthcheck):
 ```http
 x-api-key: <APP_SECRET_KEY>
-Content-Type: application/json
 ```
 
 Untuk endpoint yang membutuhkan autentikasi (Protected):
@@ -219,17 +219,8 @@ Format gagal:
 ### 1. Health Check
 
 #### `GET /api/v1/health`
-* **Auth**: Tidak perlu header `x-api-key` maupun Bearer token.
-* **Deskripsi**: Memeriksa ketersediaan server dan memverifikasi koneksi aktif ke Supabase PostgreSQL.
-* **Response (200 OK)**:
-  ```json
-  {
-    "status": "success",
-    "message": "Server E-Kantin API Berjalan Normal",
-    "database": "Terhubung ke Supabase",
-    "timestamp": "2026-09-27T15:00:00.000Z"
-  }
-  ```
+* **Auth**: Bebas
+* **Deskripsi**: Cek ketersediaan server dan koneksi aktif ke Supabase PostgreSQL.
 
 ---
 
@@ -241,63 +232,6 @@ Format gagal:
 | `POST` | `/api/v1/auth/verify-otp` | x-api-key | Publik | Verifikasi OTP & mendapatkan token JWT |
 | `POST` | `/api/v1/auth/register` | x-api-key / Bearer | Semua | Melengkapi profil akun baru |
 | `GET` | `/api/v1/auth/me` | Bearer | Semua | Mengambil profil user yang sedang login |
-
-#### Contoh Request: `POST /api/v1/auth/request-otp`
-```json
-{
-  "phoneNumber": "081234567890"
-}
-```
-*Response (200 OK)*:
-```json
-{
-  "status": "success",
-  "message": "Kode OTP telah dikirim ke WhatsApp Anda"
-}
-```
-
-#### Contoh Request: `POST /api/v1/auth/verify-otp`
-```json
-{
-  "phoneNumber": "081234567890",
-  "otp": "1234"
-}
-```
-*Response (200 OK)*:
-```json
-{
-  "status": "success",
-  "message": "Verifikasi berhasil",
-  "data": {
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "isNewUser": false,
-    "isProfileComplete": true,
-    "user": {
-      "id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-      "phoneNumber": "081234567890",
-      "fullName": "Alvian Galen",
-      "role": "STUDENT",
-      "className": "XII RPL 2",
-      "nis": "10293",
-      "points": 25,
-      "violationCount": 0,
-      "isNewUser": false,
-      "isProfileComplete": true
-    }
-  }
-}
-```
-
-#### Contoh Request: `POST /api/v1/auth/register`
-```json
-{
-  "name": "Januar Zidane",
-  "role": "STUDENT",
-  "className": "XII RPL 1",
-  "nis": "10294"
-}
-```
-*(Catatan: Jika mendaftar sebagai `SELLER`, kirimkan `role: "SELLER"` dan `standName: "Stand Aneka Minuman"`)*.
 
 ---
 
@@ -321,52 +255,115 @@ Format gagal:
 | `GET` | `/api/v1/stands/:standId/menus`| x-api-key | Publik | Menampilkan daftar menu milik suatu stand |
 | `PATCH` | `/api/v1/stands/:standId` | Bearer | SELLER, ADMIN | Ubah data stand berdasarkan ID |
 
-#### Contoh Respon: `GET /api/v1/stands/revenue`
+---
+
+### 5. Katalog Menu, Stok & Foto Produk (`/api/v1/menus`)
+
+| Method | Endpoint | Content-Type | Role | Deskripsi |
+|---|---|---|---|---|
+| `GET` | `/api/v1/menus` | - | Siswa/Semua | Ambil seluruh menu yang tersedia (`is_available: true`) |
+| `GET` | `/api/v1/menus/me` | - | SELLER | Ambil seluruh menu stand penjual (termasuk yang habis) |
+| `POST` | `/api/v1/menus/upload-image` | `multipart/form-data` | SELLER, ADMIN | **[BARU]** Upload standalone foto produk ke Supabase Storage |
+| `POST` | `/api/v1/menus` | `multipart/form-data` / JSON | SELLER | **[DIPERBARUI]** Tambah menu baru langsung dengan file foto |
+| `POST` / `PUT` | `/api/v1/menus/:menuId/image` | `multipart/form-data` | SELLER | **[BARU]** Update/ganti khusus foto pada produk tertentu |
+| `DELETE` | `/api/v1/menus/:menuId/image` | - | SELLER | **[BARU]** Hapus foto produk (set `image_url = null`) |
+| `PATCH` / `PUT` | `/api/v1/menus/:menuId` | `multipart/form-data` / JSON | SELLER | Update detail menu (bisa sertakan file foto baru) |
+| `PATCH` | `/api/v1/menus/:menuId/stock` | `application/json` | SELLER | Update cepat jumlah stok menu |
+| `DELETE` | `/api/v1/menus/:menuId` | - | SELLER | Hapus menu beserta file fotonya dari storage |
+
+#### Aturan Upload Foto Produk:
+* **Format Diizinkan**: `.jpg`, `.jpeg`, `.png`, `.webp`
+* **MIME Types**: `image/jpeg`, `image/jpg`, `image/png`, `image/webp`
+* **Ukuran Maksimal**: **5 MB**
+* **Nama Form Field**: `image`
+
+---
+
+#### Contoh 1: Upload Standalone Foto Produk (`POST /api/v1/menus/upload-image`)
+Form-Data:
+* `image`: (Pilih file: `nasi_goreng.jpg`)
+
+*Response (200 OK)*:
 ```json
 {
   "status": "success",
+  "message": "Foto produk berhasil diunggah",
   "data": {
-    "standName": "Stand Barokah",
-    "todayIncome": 125000,
-    "grossIncome": 125000,
-    "completedOrders": 8,
-    "activeQueueCount": 2,
-    "readyCount": 1,
-    "cookingCount": 1,
-    "averagePrepMinutes": 7,
-    "transactions": []
+    "imageUrl": "https://stbxuavlpwdlyxospvac.supabase.co/storage/v1/object/public/menu-images/menu-1790577646108-371016585.jpg",
+    "image_url": "https://stbxuavlpwdlyxospvac.supabase.co/storage/v1/object/public/menu-images/menu-1790577646108-371016585.jpg",
+    "fileName": "menu-1790577646108-371016585.jpg"
   }
 }
 ```
 
 ---
 
-### 5. Katalog Menu & Stok (`/api/v1/menus`)
+#### Contoh 2: Tambah Produk Langsung dengan File Foto (`POST /api/v1/menus`)
+Content-Type: `multipart/form-data`
 
-| Method | Endpoint | Auth | Role | Deskripsi |
-|---|---|---|---|---|
-| `GET` | `/api/v1/menus` | Bearer | Semua | Ambil seluruh menu yang berstatus tersedia (`is_available: true`) |
-| `GET` | `/api/v1/menus/me` | Bearer | SELLER | Ambil semua menu stand penjual (termasuk yang habis) |
-| `POST` | `/api/v1/menus` | Bearer | SELLER | Tambah menu baru |
-| `PATCH` / `PUT` | `/api/v1/menus/:menuId` | Bearer | SELLER | Update detail data menu (nama, harga, foto, status) |
-| `PATCH` | `/api/v1/menus/:menuId/stock` | Bearer | SELLER | Update cepat jumlah stok menu |
-| `DELETE` | `/api/v1/menus/:menuId` | Bearer | SELLER | Hapus menu dari katalog stand |
+Form-Data Fields:
+* `name`: `Nasi Goreng Spesial`
+* `price`: `15000`
+* `stock`: `25`
+* `isAvailable`: `true`
+* `image`: (File gambar: `nasi_goreng.png`)
 
-#### Contoh Request: `POST /api/v1/menus`
+*Response (201 Created)*:
 ```json
 {
-  "name": "Nasi Goreng Spesial",
-  "price": 15000,
-  "stock": 25,
-  "imageUrl": "https://images.unsplash.com/photo-1603133872878-684f208fb84b",
-  "isAvailable": true
+  "status": "success",
+  "message": "Menu berhasil ditambahkan",
+  "data": {
+    "id": "e4b2d184-b521-4f70-a3ce-8c3e8be0e38a",
+    "stand_id": "bf7b8db5-ce1c-4692-9dd9-e2e05d4a64dc",
+    "name": "Nasi Goreng Spesial",
+    "price": 15000,
+    "stock": 25,
+    "image_url": "https://stbxuavlpwdlyxospvac.supabase.co/storage/v1/object/public/menu-images/menu-1790577646393-950353598.png",
+    "is_available": true,
+    "created_at": "2026-09-28T06:40:48.971Z"
+  }
 }
 ```
 
-#### Contoh Request: `PATCH /api/v1/menus/:menuId/stock`
+---
+
+#### Contoh 3: Update Khusus Foto Produk (`POST /api/v1/menus/:menuId/image`)
+Content-Type: `multipart/form-data`
+* `image`: (Pilih file foto baru: `nasi_goreng_hd.webp`)
+
+*Response (200 OK)*:
 ```json
 {
-  "stock": 50
+  "status": "success",
+  "message": "Foto produk berhasil diperbarui",
+  "data": {
+    "id": "e4b2d184-b521-4f70-a3ce-8c3e8be0e38a",
+    "name": "Nasi Goreng Spesial",
+    "price": 15000,
+    "stock": 25,
+    "image_url": "https://stbxuavlpwdlyxospvac.supabase.co/storage/v1/object/public/menu-images/menu-1790577647363-964771194.jpg",
+    "is_available": true
+  }
+}
+```
+
+---
+
+#### Contoh 4: Hapus Khusus Foto Produk (`DELETE /api/v1/menus/:menuId/image`)
+*Response (200 OK)*:
+```json
+{
+  "status": "success",
+  "message": "Foto produk berhasil dihapus",
+  "data": {
+    "id": "e4b2d184-b521-4f70-a3ce-8c3e8be0e38a",
+    "name": "Nasi Goreng Spesial",
+    "price": 15000,
+    "stock": 25,
+    "image_url": null,
+    "is_available": true
+  }
 }
 ```
 
@@ -382,73 +379,24 @@ Format gagal:
 | `PATCH` / `PUT` | `/api/v1/orders/:orderId/status`| Bearer | SELLER, ADMIN | Perbarui status proses masak/siap diambil |
 | `PATCH` | `/api/v1/orders/:orderId/pickup`| Bearer | SELLER, ADMIN | Konfirmasi pesanan selesai (`COMPLETED`) & berikan poin |
 
-#### Contoh Request Checkout: `POST /api/v1/orders/checkout`
-```json
-{
-  "standId": "5c4c639b-10b1-4af4-a55d-2e6bfc4913ac",
-  "items": [
-    {
-      "menuId": "7a14e912-32cc-4974-9541-e1e793910c22",
-      "quantity": 2
-    }
-  ],
-  "paymentMethod": "QRIS",
-  "usePoints": false
-}
-```
-
-*Response (201 Created)*:
-```json
-{
-  "status": "success",
-  "message": "Pesanan berhasil dibuat!",
-  "data": {
-    "id": "e9a4e321-4f12-42aa-b88a-989255ab7611",
-    "orderNumber": "Q-8192",
-    "total_amount": 30000,
-    "paymentMethod": "QRIS",
-    "status": "PENDING_PAYMENT",
-    "used_points": 0,
-    "earned_points": 3
-  }
-}
-```
-
 ---
 
 ## Integrasi dengan Frontend Android
 
 Frontend mobile [Eight-Canteen](https://github.com/Papi0404/Eight-Canteen.git) menggunakan **Retrofit 2** dan **OkHttp 3 Interceptor** yang dikonfigurasi pada `com.januarzidanetinendeng.eightcanteen.data.remote.ApiConfig`.
 
-### Konfigurasi Interceptor Frontend
-
-Setiap request dari Android secara otomatis menyisipkan:
-1. `x-api-key`: Mengambil nilai dari `BuildConfig.API_KEY`
-2. `Authorization`: Menyisipkan `Bearer <token>` jika pengguna telah login.
-
-### Konfigurasi Alamat Server di Android
-
-Atur `BASE_URL` dan `API_KEY` di `local.properties` atau `app/build.gradle.kts`:
-
-```properties
-# Skenario 1: Menjalankan di Android Studio Emulator
-BASE_URL="http://10.0.2.2:3000/api/v1/"
-
-# Skenario 2: Menjalankan di Smartphone Fisik via Wi-Fi LAN
-# BASE_URL="http://192.168.1.50:3000/api/v1/"
-
-# Skenario 3: Menjalankan dengan Server Production / Ngrok / Render
-# BASE_URL="https://backend-kantin-mobile.onrender.com/api/v1/"
-
-API_KEY="isi_sesuai_APP_SECRET_KEY_di_env"
+### Konfigurasi Multipart Upload di Android Retrofit
+Untuk mengunggah gambar dari aplikasi Android:
+```kotlin
+@Multipart
+@POST("menus")
+suspend fun createMenuWithImage(
+    @Part("name") name: RequestBody,
+    @Part("price") price: RequestBody,
+    @Part("stock") stock: RequestBody,
+    @Part image: MultipartBody.Part?
+): BaseResponse<MenuResponse>
 ```
-
-### Kompatibilitas Naming Data (Dual Naming)
-Backend menyediakan kompatibilitas ganda (mendukung *camelCase* dan *snake_case*) agar pembacaan JSON oleh Gson/Kotlin Serialization di Android tidak pernah bernilai `null`:
-* Nomor Order: `orderNumber` & `order_number`
-* Nomor Counter/Stand: `counterSlot`, `counterNumber`, & `stand_number`
-* Kelas Siswa: `studentClass`, `className`, & `class_name`
-* Total Biaya: `totalAmount` & `total_amount`
 
 ---
 
@@ -456,55 +404,26 @@ Backend menyediakan kompatibilitas ganda (mendukung *camelCase* dan *snake_case*
 
 ### 1. Prasyarat Sistem
 * [Node.js](https://nodejs.org/) versi **v18.x** atau **v20.x** LTS
-* [NPM](https://www.npmjs.com/) (sudah terinstal bersama Node.js)
-* Proyek database di [Supabase](https://supabase.com/)
+* [NPM](https://www.npmjs.com/)
+* Proyek database & storage di [Supabase](https://supabase.com/)
 * Akun dan Device aktif di [Fonnte](https://fonnte.com/) untuk WhatsApp OTP
 
-### 2. Kloning Repositori
+### 2. Kloning & Install Dependensi
 ```bash
 git clone https://github.com/alviangalen/backend-kantin-mobile.git
 cd backend-kantin-mobile
-```
-
-### 3. Instalasi Dependensi
-```bash
 npm install
 ```
 
-### 4. Menyiapkan File Environment
-Salin template berkas environment:
+### 3. Konfigurasi .env
+Salin berkas template:
 ```bash
 cp .env.example .env
-```
-Edit file `.env` dan lengkapi kredensial Anda.
-
-### 5. Menjalankan Server
-Jalankan pada mode development (dengan live reload Nodemon):
-```bash
-npm run dev
-```
-
-Jalankan pada mode production:
-```bash
-npm start
-```
-
-Output konsol akan menampilkan:
-```
-[SERVER] API berjalan di http://localhost:3000
-[ENV] Mode: development
-```
-
-Uji koneksi melalui browser atau Postman:
-```
-GET http://localhost:3000/api/v1/health
 ```
 
 ---
 
 ## Konfigurasi Environment (.env)
-
-Berikut adalah daftar variabel environment yang wajib diisi:
 
 | Variabel | Deskripsi | Contoh |
 |---|---|---|
@@ -512,81 +431,95 @@ Berikut adalah daftar variabel environment yang wajib diisi:
 | `NODE_ENV` | Lingkungan aplikasi (`development` / `production`) | `development` |
 | `SUPABASE_URL` | URL Project API Supabase | `https://xyzcompany.supabase.co` |
 | `SUPABASE_ANON_KEY` | Kunci publik Supabase (Anon Key) | `eyJhbGciOiJIUzI1... ` |
-| `SUPABASE_SERVICE_KEY` | Kunci Service Role Supabase (untuk bypass RLS backend) | `eyJhbGciOiJIUzI1... ` |
-| `JWT_SECRET` | String acak rahasia untuk tanda tangan token JWT | `super_secret_jwt_key_at_least_32_chars` |
-| `APP_SECRET_KEY` | Kunci API rahasia header `x-api-key` (Wajib sinkron dengan Android) | `eight_canteen_secret_2026` |
+| `SUPABASE_SERVICE_KEY` | Kunci Service Role Supabase (akses penuh storage & database) | `eyJhbGciOiJIUzI1... ` |
+| `JWT_SECRET` | String acak rahasia tanda tangan token JWT | `super_secret_jwt_key_at_least_32_chars` |
+| `APP_SECRET_KEY` | Kunci API rahasia header `x-api-key` | `eight_canteen_secret_2026` |
 | `FONNTE_TOKEN` | API Token dari akun Fonnte WhatsApp Gateway | `AbCdEf1234567890` |
 
 ---
 
-## Skema Database (Supabase)
+## Skema Database & Supabase Storage (SQL Editor)
 
-Struktur tabel relasional di Supabase PostgreSQL:
+Jalankan seluruh query berikut di menu **SQL Editor** pada dashboard [Supabase](https://supabase.com/) Anda untuk mengaktifkan bucket penyimpanan foto produk beserta kebijakan keamanannya:
 
-```mermaid
-erDiagram
-    PROFILES ||--o{ ORDERS : places
-    PROFILES ||--o| STANDS : owns
-    STANDS ||--o{ MENUS : has
-    STANDS ||--o{ ORDERS : receives
-    ORDERS ||--|{ ORDER_ITEMS : contains
-    MENUS ||--o{ ORDER_ITEMS : referenced_in
+```sql
+-- =========================================================================
+-- SUPABASE SQL EDITOR SCRIPT: STORAGE BUCKET & FOTO PRODUK KANTIN
+-- =========================================================================
 
-    PROFILES {
-        uuid id PK
-        string phone_number
-        string full_name
-        string role "STUDENT | SELLER | ADMIN"
-        string class_name
-        string nis
-        int points
-        int violation_count
-        timestamp created_at
-    }
+-- 1. Buat bucket penyimpanan 'menu-images' jika belum ada
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'menu-images',
+    'menu-images',
+    true,
+    5242880, -- Batas maksimal 5 MB per file
+    ARRAY['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+)
+ON CONFLICT (id) DO UPDATE SET
+    public = true,
+    file_size_limit = 5242880,
+    allowed_mime_types = ARRAY['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
-    STANDS {
-        uuid id PK
-        uuid owner_id FK
-        string name
-        string stand_number
-        string category
-        boolean is_open
-        float rating
-        timestamp created_at
-    }
+-- 2. Kebijakan RLS agar seluruh foto di bucket 'menu-images' dapat dilihat secara publik
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE tablename = 'objects' AND schemaname = 'storage' AND policyname = 'Public Access Menu Images'
+    ) THEN
+        CREATE POLICY "Public Access Menu Images" 
+        ON storage.objects FOR SELECT 
+        USING (bucket_id = 'menu-images');
+    END IF;
+END $$;
 
-    MENUS {
-        uuid id PK
-        uuid stand_id FK
-        string name
-        int price
-        int stock
-        string image_url
-        boolean is_available
-        timestamp created_at
-    }
+-- 3. Kebijakan RLS agar pengguna / service role dapat mengunggah file foto baru
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE tablename = 'objects' AND schemaname = 'storage' AND policyname = 'Allow Upload Menu Images'
+    ) THEN
+        CREATE POLICY "Allow Upload Menu Images" 
+        ON storage.objects FOR INSERT 
+        WITH CHECK (bucket_id = 'menu-images');
+    END IF;
+END $$;
 
-    ORDERS {
-        uuid id PK
-        string order_number
-        uuid student_id FK
-        uuid stand_id FK
-        int total_amount
-        string payment_method "QRIS | CASH"
-        string status "PENDING_PAYMENT | COOKING | READY_FOR_PICKUP | COMPLETED | CANCELLED"
-        int used_points
-        int earned_points
-        timestamp created_at
-        timestamp updated_at
-    }
+-- 4. Kebijakan RLS agar pengguna / service role dapat memperbarui file foto yang sudah ada
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE tablename = 'objects' AND schemaname = 'storage' AND policyname = 'Allow Update Menu Images'
+    ) THEN
+        CREATE POLICY "Allow Update Menu Images" 
+        ON storage.objects FOR UPDATE 
+        USING (bucket_id = 'menu-images');
+    END IF;
+END $$;
 
-    ORDER_ITEMS {
-        uuid id PK
-        uuid order_id FK
-        uuid menu_id FK
-        int quantity
-        int price_at_time
-    }
+-- 5. Kebijakan RLS agar pengguna / service role dapat menghapus file foto dari bucket
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE tablename = 'objects' AND schemaname = 'storage' AND policyname = 'Allow Delete Menu Images'
+    ) THEN
+        CREATE POLICY "Allow Delete Menu Images" 
+        ON storage.objects FOR DELETE 
+        USING (bucket_id = 'menu-images');
+    END IF;
+END $$;
+
+-- 6. Pastikan kolom image_url pada tabel 'menus' telah tersedia
+ALTER TABLE menus ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- 7. Verifikasi bahwa bucket telah aktif
+SELECT id, name, public, file_size_limit, allowed_mime_types 
+FROM storage.buckets 
+WHERE id = 'menu-images';
 ```
 
 ---
@@ -601,7 +534,6 @@ Layanan ini menyertakan *background worker* otomatis menggunakan **node-cron** (
      `payment_method = 'CASH'` DAN `status = 'READY_FOR_PICKUP'`.
   2. Mengubah status pesanan tersebut menjadi `CANCELLED`.
   3. Mengambil profil siswa pemesan dan menambahkan nilai sanksi `violation_count += 1`.
-  4. Mencatat log penalti pada sistem untuk ditindaklanjuti oleh pihak sekolah/koperasi.
 
 ---
 
@@ -609,14 +541,10 @@ Layanan ini menyertakan *background worker* otomatis menggunakan **node-cron** (
 
 Layanan ini telah menyertakan berkas konfigurasi `render.yaml`. Langkah deployment:
 
-1. Buat akun di [Render.com](https://render.com/).
+1. Buka akun [Render.com](https://render.com/).
 2. Buat **New Web Service** dan tautkan dengan repositori GitHub: `https://github.com/alviangalen/backend-kantin-mobile.git`.
-3. Konfigurasi runtime:
-   - **Environment**: `Node`
-   - **Build Command**: `npm install`
-   - **Start Command**: `npm start`
-4. Masukkan seluruh variabel yang ada di bagian [Konfigurasi Environment](#-konfigurasi-environment-env) ke menu **Environment Variables** di Render.
-5. Deploy Web Service. Setelah aktif, gunakan URL HTTPS yang diberikan oleh Render sebagai `BASE_URL` pada aplikasi Android Eight Canteen.
+3. Runtime: `Node`, Build Command: `npm install`, Start Command: `npm start`.
+4. Masukkan seluruh variabel yang ada di bagian [Konfigurasi Environment](#konfigurasi-environment-env) ke **Environment Variables** di Render.
 
 ---
 
@@ -635,4 +563,5 @@ Layanan ini telah menyertakan berkas konfigurasi `render.yaml`. Langkah deployme
 
 ## Lisensi
 
+Proyek ini dilisensikan di bawah [ISC License](LICENSE).  
 Hak Cipta &copy; 2026 Tim E-Kantin SMKN 8 Jakarta.
