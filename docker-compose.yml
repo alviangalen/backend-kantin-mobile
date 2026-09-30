@@ -1,0 +1,16 @@
+﻿services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: eight-canteen-backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PORT=${PORT:-3000}
+      - NODE_ENV=production

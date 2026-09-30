@@ -7,6 +7,7 @@
 <p align="center">
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white" alt="Node.js" /></a>
   <a href="https://expressjs.com/"><img src="https://img.shields.io/badge/Express.js-5.x-000000?logo=express&logoColor=white" alt="Express.js" /></a>
+  <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white" alt="Docker" /></a>
   <a href="https://supabase.com/"><img src="https://img.shields.io/badge/Database-Supabase%20(PostgreSQL)-3ECF8E?logo=supabase&logoColor=white" alt="Supabase" /></a>
   <a href="https://supabase.com/storage"><img src="https://img.shields.io/badge/Storage-Supabase%20Storage%20(5MB)-3ECF8E?logo=supabase&logoColor=white" alt="Supabase Storage" /></a>
   <a href="https://jwt.io/"><img src="https://img.shields.io/badge/Auth-JWT%20%26%20WhatsApp%20OTP-FF6C37?logo=jsonwebtokens&logoColor=white" alt="JWT Auth" /></a>
@@ -41,7 +42,13 @@ Layanan backend ini dirancang khusus untuk menjadi *backend service* utama bagi 
    - [5. Katalog Menu, Stok & Foto Produk (/api/v1/menus)](#5-katalog-menu-stok--foto-produk-apiv1menus)
    - [6. Pesanan & Checkout (/api/v1/orders)](#6-pesanan--checkout-apiv1orders)
 6. [Integrasi dengan Frontend Android](#integrasi-dengan-frontend-android)
-7. [Instalasi & Pengaturan Lokal](#instalasi--pengaturan-lokal)
+7. [Panduan Instalasi & Menjalankan (Docker & Manual)](#panduan-instalasi--menjalankan-docker--manual)
+   - [Prasyarat Sistem](#prasyarat-sistem)
+   - [Metode 1: Menjalankan dengan Docker Compose (Sangat Direkomendasikan)](#metode-1-menjalankan-dengan-docker-compose-sangat-direkomendasikan)
+   - [Mode Pengembangan dengan Docker Compose (Hot-Reload)](#mode-pengembangan-dengan-docker-compose-hot-reload)
+   - [NPM Shortcut untuk Docker](#npm-shortcut-untuk-docker)
+   - [Metode 2: Menggunakan Docker CLI Standalone](#metode-2-menggunakan-docker-cli-standalone)
+   - [Metode 3: Instalasi Tradisional (Node.js & NPM Manual)](#metode-3-instalasi-tradisional-nodejs--npm-manual)
 8. [Konfigurasi Environment (.env)](#konfigurasi-environment-env)
 9. [Skema Database & Supabase Storage (SQL Editor)](#skema-database--supabase-storage-sql-editor)
 10. [Background Cron Job (Patroli Penalti)](#background-cron-job-patroli-penalti)
@@ -180,11 +187,13 @@ backend-kantin-mobile/
 │   ├── services/
 │   │   ├── storageService.js    # Service upload & hapus foto di Supabase Storage
 │   │   └── whatsappService.js   # Service pengiriman OTP via Fonnte API
-│   └── server.js                # Server Express, konfigurasi middleware, & routing
-├── add_order_note_column.sql    # Query SQL Editor tambah kolom catatan pesanan (note)
-├── supabase_storage_setup.sql   # Query SQL Editor setup bucket 'menu-images' & RLS
+│   └── server.js                # Server Express, konfigurasi middleware, graceful shutdown, & routing
+├── Dockerfile                   # Konfigurasi multi-stage image Docker (Development & Production)
+├── docker-compose.yml           # Orkestrasi Docker Compose production-ready
+├── docker-compose.dev.yml       # Orkestrasi Docker Compose mode development (hot-reload nodemon)
+├── .dockerignore                # Daftar pengecualian file saat proses build Docker
 ├── .env.example                 # Template konfigurasi environment
-├── package.json                 # Dependensi & script eksekusi (express, multer, supabase)
+├── package.json                 # Dependensi & script eksekusi (express, multer, supabase, docker scripts)
 └── render.yaml                  # Konfigurasi deployment web service di Render
 ```
 
@@ -565,26 +574,145 @@ suspend fun createMenuWithImage(
 
 ---
 
-## Instalasi & Pengaturan Lokal
+## Panduan Instalasi & Menjalankan (Docker & Manual)
 
-### 1. Prasyarat Sistem
-* [Node.js](https://nodejs.org/) versi **v18.x** atau **v20.x** LTS
-* [NPM](https://www.npmjs.com/)
-* Proyek database & storage di [Supabase](https://supabase.com/)
-* Akun dan Device aktif di [Fonnte](https://fonnte.com/) untuk WhatsApp OTP
+### Prasyarat Sistem
+* **Untuk Pengguna Docker (Paling Praktis & Direkomendasikan)**:
+  * [Docker](https://www.docker.com/) Engine & [Docker Compose](https://docs.docker.com/compose/) (tersedia di Docker Desktop untuk Windows/macOS atau paket Docker di Linux/WSL).
+* **Untuk Pengguna Manual (Tanpa Docker)**:
+  * [Node.js](https://nodejs.org/) versi **v18.x** atau **v20.x+** / **v22 LTS**
+  * [NPM](https://www.npmjs.com/)
+* **Akun & Layanan Eksternal**:
+  * Proyek database & storage di [Supabase](https://supabase.com/)
+  * Akun dan Device aktif di [Fonnte](https://fonnte.com/) untuk pengiriman WhatsApp OTP
 
-### 2. Kloning & Install Dependensi
+---
+
+### Metode 1: Menjalankan dengan Docker Compose (Sangat Direkomendasikan)
+
+Docker Compose adalah cara paling ringkas dan bebas konfigurasi manual untuk menjalankan backend. Seluruh dependensi, timezone Jakarta, dan runtime terisolasi secara rapi di dalam container.
+
+#### 1. Kloning Repositori
 ```bash
 git clone https://github.com/alviangalen/backend-kantin-mobile.git
 cd backend-kantin-mobile
-npm install
 ```
 
-### 3. Konfigurasi .env
-Salin berkas template:
+#### 2. Konfigurasi Environment (.env)
+Salin berkas template environment:
 ```bash
 cp .env.example .env
 ```
+> Buka file `.env` dan sesuaikan kredensial Supabase (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`), token WhatsApp Fonnte, serta secret key aplikasi Anda.
+
+#### 3. Jalankan Container (Production Mode)
+Jalankan perintah berikut untuk meng-compile image dan menjalankan container di latar belakang (*detached mode*):
+```bash
+docker compose up -d --build
+```
+Layanan backend akan langsung aktif di:
+```text
+http://localhost:3000
+```
+
+#### 4. Memantau Log & Status Container
+* Untuk melihat log aktivitas server secara realtime:
+  ```bash
+  docker compose logs -f
+  ```
+* Untuk melihat status kesehatan (*health status*) container:
+  ```bash
+  docker compose ps
+  ```
+
+#### 5. Menghentikan Layanan
+Untuk menghentikan container backend secara aman (*graceful shutdown*):
+```bash
+docker compose down
+```
+
+---
+
+### Mode Pengembangan dengan Docker Compose (Hot-Reload)
+
+Jika Anda sedang aktif mengembangkan fitur baru dan membutuhkan fitur *hot-reload* (server otomatis restart setiap kali file di folder `src/` disimpan):
+
+```bash
+docker compose -f docker-compose.dev.yml up
+```
+
+Keunggulan mode ini:
+* Folder `src/` lokal terhubung (*bind mount*) langsung ke dalam container.
+* Berjalan menggunakan **Nodemon** sehingga proses re-start server instan tanpa perlu rebuild image.
+
+---
+
+### NPM Shortcut untuk Docker
+
+Bagi Anda yang menyukai perintah ringkas via `npm`, telah disediakan script pembantu di `package.json`:
+
+| Perintah | Deskripsi |
+|---|---|
+| `npm run docker:up` | Menyalakan container backend di background (`docker compose up -d`) |
+| `npm run docker:dev` | Menjalankan mode development hot-reload (`docker-compose.dev.yml`) |
+| `npm run docker:logs` | Memantau log realtime aplikasi (`docker compose logs -f`) |
+| `npm run docker:down` | Menghentikan container (`docker compose down`) |
+| `npm run docker:build` | Membangun ulang image Docker (`docker compose build`) |
+
+---
+
+### Metode 2: Menggunakan Docker CLI Standalone
+
+Jika ingin mengoperasikan image Docker secara manual tanpa docker-compose:
+
+1. **Build Docker Image**:
+   ```bash
+   docker build -t eight-canteen-backend .
+   ```
+
+2. **Jalankan Container**:
+   ```bash
+   docker run -d \
+     --name eight-canteen-backend \
+     -p 3000:3000 \
+     --env-file .env \
+     eight-canteen-backend
+   ```
+
+3. **Cek Log & Hentikan Container**:
+   ```bash
+   docker logs -f eight-canteen-backend
+   docker stop eight-canteen-backend
+   docker rm eight-canteen-backend
+   ```
+
+---
+
+### Metode 3: Instalasi Tradisional (Node.js & NPM Manual)
+
+Jika Anda memilih untuk menjalankan backend langsung di sistem operasi tanpa Docker:
+
+1. **Kloning & Install Dependensi**:
+   ```bash
+   git clone https://github.com/alviangalen/backend-kantin-mobile.git
+   cd backend-kantin-mobile
+   npm install
+   ```
+
+2. **Konfigurasi .env**:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Jalankan Aplikasi**:
+   * Mode Pengembangan (*Development dengan Nodemon*):
+     ```bash
+     npm run dev
+     ```
+   * Mode Produksi (*Production*):
+     ```bash
+     npm start
+     ```
 
 ---
 

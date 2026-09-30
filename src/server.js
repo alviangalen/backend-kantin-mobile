@@ -71,9 +71,26 @@ app.use('/api/v1/menus', menuRoutes);
 app.use('/api/v1/orders', orderRoutes);
 app.use('/api/v1/admin', adminRoutes);
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`[SERVER] API berjalan di http://localhost:${PORT}`);
     console.log(`[ENV] Mode: ${process.env.NODE_ENV}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('[SERVER] Menerima sinyal SIGTERM, menutup koneksi server...');
+    server.close(() => {
+        console.log('[SERVER] Server berhasil dihentikan.');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('[SERVER] Menerima sinyal SIGINT, menutup koneksi server...');
+    server.close(() => {
+        console.log('[SERVER] Server berhasil dihentikan.');
+        process.exit(0);
+    });
 });
 
 module.exports = app;
