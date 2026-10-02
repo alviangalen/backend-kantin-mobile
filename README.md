@@ -510,7 +510,7 @@ Content-Type: `multipart/form-data`
     "standId": "5c4c639b-10b1-4af4-a55d-2e6bfc4913ac",
     "standName": "Jus Buah Segar Bang Ijul",
     "ownerName": "Bang Ijul",
-    "ownerPhone": "0881010005339",
+    "ownerPhone": "0881012343229",
     "accountNumber": "Stand 01",
     "qrisBalance": 750000,
     "cashBalance": 1350000,
@@ -536,7 +536,7 @@ Content-Type: `multipart/form-data`
   "data": {
     "id": "888423eb-33f2-4afa-a676-dc4ec6cb8558",
     "fullName": "Galen Alvian",
-    "phoneNumber": "087733970522",
+    "phoneNumber": "08773453723432",
     "role": "STUDENT",
     "className": "XII RPL",
     "points": 11,
